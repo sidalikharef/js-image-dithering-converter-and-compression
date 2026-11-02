@@ -1,85 +1,201 @@
 # Sidali DitherLab
 
-**Every Pixel, Perfected.**
+<div align="center">
 
-Sidali DitherLab is a private, browser-based tool for creating monochrome, transparent Floyd–Steinberg dithering from your images. Import, adjust, compare, and export without sending image data to a server.
+<img src="./assets/dither-orbit.svg" alt="Sidali DitherLab Logo" width="100" />
 
-![Sidali DitherLab social preview](./assets/social-preview.png)
+# Every Pixel, Perfected.
 
-![Sidali DitherLab dark editor](./assets/screenshots/editor-dark.png)
+**A modern, open-source image dithering and optimization studio.**
 
-[Live demo](https://sidalikharef.github.io/js-image-dithering-converter-and-compression/)
+Transform images into beautiful monochrome, pixelated artwork with precision controls, real-time comparisons, and privacy-first processing.
 
-## Editor screenshots
+[**🚀 Live Demo**](https://ditterlab.sidalikharef.cc) · [**🌐 Portfolio**](https://sidalikharef.cc) · [**💻 GitHub**](https://github.com/sidalikharef)
 
-| Dark editor | Light editor |
-|---|---|
-| ![Dark editor](./assets/screenshots/editor-dark.png) | ![Light editor](./assets/screenshots/editor-light.png) |
+![License](https://img.shields.io/badge/License-MIT-B6F36B?style=flat-square)
+![JavaScript](https://img.shields.io/badge/JavaScript-ES_Modules-F7DF1E?style=flat-square&logo=javascript&logoColor=black)
+![Status](https://img.shields.io/badge/Status-Active_Development-B6F36B?style=flat-square)
+![Dependencies](https://img.shields.io/badge/Runtime_Dependencies-0-171A1C?style=flat-square)
 
-| Before and after | Mobile editor |
-|---|---|
-| ![Compare view](./assets/screenshots/compare-view.png) | ![Mobile editor](./assets/screenshots/mobile-editor.png) |
+</div>
 
-The included [sample artwork](./assets/sample-art.png) is an original vector illustration created for the project and rasterized from [its SVG source](./assets/sample-art.svg). Screenshots are captures of the running application.
+---
 
-## Features
+![Sidali DitherLab Social Preview](./assets/social-preview.png)
 
-- Import by file picker or drag and drop. Inputs are limited to 40 MiB and 50 megapixels.
-- Adjust output width, pixel size, black threshold, contrast, diffusion strength, and WebP quality.
-- Preview the processed output, original, or a draggable before/after comparison.
-- Zoom in and out, or fit the preview to the available canvas area.
-- Undo and redo adjustment changes; reset settings to their defaults.
-- Inspect output dimensions and actual encoded WebP size before downloading.
-- Keep black pixels opaque and make white pixels transparent.
-- Process images locally in the browser; no image upload, account, or runtime dependency.
-- Switch between dark and light editor themes.
+## ✨ Overview
 
-## Getting started
+**Sidali DitherLab** is a lightweight, privacy-first image-processing application built with vanilla JavaScript, HTML, and CSS.
 
-The app uses JavaScript modules, so serve the project over HTTP instead of opening `index.html` directly:
+It provides precise Floyd–Steinberg dithering with adjustable output settings, interactive image comparisons, and WebP optimization.
 
-```sh
+Everything runs locally in your browser. Your images are processed on your device without being uploaded to a server.
+
+Designed for developers, digital artists, designers, and anyone interested in experimental image processing.
+
+### 🌐 Try It Online
+
+**[Launch Sidali DitherLab →](https://ditterlab.sidalikharef.cc)**
+
+No installation, account, or image upload to a server required.
+
+## 📸 Screenshots
+
+### Professional Editor — Dark Theme
+
+![Sidali DitherLab Dark Editor](./assets/screenshots/editor-dark.png)
+
+### Light Theme
+
+![Sidali DitherLab Light Editor](./assets/screenshots/editor-light.png)
+
+### Before & After Comparison
+
+![Sidali DitherLab Compare View](./assets/screenshots/compare-view.png)
+
+### Responsive Mobile Experience
+
+![Sidali DitherLab Mobile Editor](./assets/screenshots/mobile-editor.png)
+
+> The screenshots were captured from the actual running application using original sample artwork included in this repository.
+
+## ⚡ Features
+
+### 🎨 Image Processing
+
+- **Floyd–Steinberg dithering:** Convert images into detailed monochrome artwork using error diffusion.
+- **Adjustable output dimensions:** Resize images while preserving their aspect ratio.
+- **Pixel-size control:** Create fine-grained dithering or bold pixelated styles.
+- **Black threshold:** Control the balance between black and transparent pixels.
+- **Contrast adjustment:** Fine-tune image detail before quantization.
+- **Diffusion strength:** Adjust how quantization error spreads between pixels.
+- **Transparency support:** Generate opaque black pixels on a transparent background.
+
+### 🖥️ Professional Editor
+
+- Modern Graphite + Electric Lime interface.
+- Dark and light themes.
+- Image upload through file picker or drag and drop.
+- Interactive original/output comparison slider.
+- Original, processed, and comparison views.
+- Zoom in, zoom out, and fit-to-screen controls.
+- Undo and redo adjustment changes.
+- Reset settings to defaults.
+- Responsive layouts for desktop and mobile.
+
+### 📦 Image Optimization
+
+- WebP image export.
+- Adjustable WebP quality.
+- Actual encoded file-size reporting.
+- Output dimension information.
+- Browser-based image processing.
+- No third-party runtime dependencies.
+
+### 🔒 Privacy First
+
+- No account required.
+- No server-side image processing.
+- No image uploads.
+- No mandatory cloud services.
+- Image processing happens in the browser.
+
+**Input limits:** 40 MiB per file and 50 megapixels.
+
+## 🚀 Getting Started
+
+### Option 1 — Use the Online Studio
+
+Open the live application:
+
+**https://ditterlab.sidalikharef.cc**
+
+Upload an image, adjust the dithering parameters, compare the result, and export your optimized artwork.
+
+### Option 2 — Run Locally
+
+Clone the repository:
+
+```bash
+git clone https://github.com/sidalikharef/js-image-dithering-converter-and-compression.git
+```
+
+Navigate into the project:
+
+```bash
+cd js-image-dithering-converter-and-compression
+```
+
+Start a local development server:
+
+```bash
 python3 -m http.server 8000
 ```
 
-Open [http://localhost:8000](http://localhost:8000) in a modern browser.
+Open:
 
-## Processing
+**http://localhost:8000**
 
-The source is resized to the requested output dimensions while preserving its aspect ratio. The app reduces the image to a logical grid based on the pixel-size setting, applies Floyd–Steinberg error diffusion, and scales the result back to the requested dimensions using nearest-neighbor interpolation.
+Because the application uses native JavaScript ES modules, it must be served over HTTP rather than opened directly through the `file://` protocol.
 
-For each logical pixel, luminance is adjusted by the contrast setting and quantized to black or transparent at the selected threshold. Quantization error is distributed to the right (7/16), bottom-left (3/16), below (5/16), and bottom-right (1/16). Calculations use a `Float32Array` so fractional error is retained rather than clamped during processing. The diffusion-strength setting scales the amount of error propagated.
+No `npm install`, build process, or external runtime dependencies are required to run the web application.
 
-Fully transparent source pixels are composited against white for luminance calculation. The output contains opaque black pixels or fully transparent pixels; it does not create partially transparent dots.
+## 🧠 How Dithering Works
 
-## Export
+Sidali DitherLab currently uses the **Floyd–Steinberg error-diffusion algorithm**.
 
-Export uses the browser Canvas API to encode WebP. The app checks the returned blob MIME type and reports an error instead of labeling a different format as WebP when encoding is unavailable. The displayed file size is the encoded blob's actual size.
+The processing pipeline follows these steps:
 
-The 30 KiB indicator is a target, not a guarantee. File size depends on image content, dimensions, grain pattern, and browser encoder. The quality control changes encoder quality but cannot guarantee a particular file size.
+1. Resize the original image to the requested output dimensions while preserving its aspect ratio.
+2. Reduce the image to a logical pixel grid.
+3. Calculate pixel luminance and apply contrast.
+4. Quantize each pixel into black or transparent.
+5. Distribute quantization error to neighboring pixels.
+6. Scale the result using nearest-neighbor interpolation.
+7. Encode the final image as WebP.
 
-## Development
+### Error Diffusion Matrix
 
-The project has no installed dependencies or build step. Run its tests and syntax checks with Node.js:
-
-```sh
-npm test
-npm run check
-```
-
-The core functions in `core.mjs` do not depend on browser APIs and are covered by Node's built-in test runner.
-
-## Current limitations
-
-- Floyd–Steinberg is the only implemented dithering algorithm.
-- Export is WebP only; supported formats depend on the browser's Canvas encoder.
-- Image processing runs on the main thread. Very large images may take time and browser canvas limits may apply.
-- This repository remains a small, dependency-free JavaScript application; a TypeScript/pnpm monorepo, CLI, React package, batch tools, and offline/PWA support are not implemented.
-
-## Project structure
+The Floyd–Steinberg algorithm distributes error according to the following pattern:
 
 ```text
-.
+             X    7/16
+    3/16    5/16  1/16
+```
+
+Where `X` represents the currently processed pixel.
+
+Fractional error is preserved using a `Float32Array`, preventing premature clamping during diffusion.
+
+The diffusion-strength setting controls how much error is propagated.
+
+Fully transparent source pixels are composited against white for luminance calculations.
+
+The resulting image contains opaque black pixels and fully transparent pixels, without partially transparent dots.
+
+## 📤 Export and Compression
+
+Images are encoded through the browser Canvas API using WebP.
+
+Available controls include:
+
+- Output width.
+- Pixel size.
+- WebP quality.
+- Contrast.
+- Threshold.
+- Diffusion strength.
+
+The application validates the encoded blob's MIME type to avoid incorrectly labeling an unsupported format as WebP.
+
+The reported output size is based on the actual encoded blob.
+
+**Note:** The 30 KiB indicator is a target, not a guaranteed output size. Compression efficiency depends on source content, dimensions, dithering patterns, and browser encoding behavior.
+
+## 🏗️ Project Structure
+
+```text
+sidali-ditherlab/
 ├── assets/
 │   ├── dither-orbit.svg
 │   ├── dither-orbit-light.svg
@@ -95,23 +211,143 @@ The core functions in `core.mjs` do not depend on browser APIs and are covered b
 │       ├── editor-light.png
 │       ├── compare-view.png
 │       └── mobile-editor.png
+├── screenshots/
+│   └── application.png
+├── tests/
+│   └── core.test.mjs
 ├── index.html
 ├── main.js
 ├── core.mjs
 ├── styles.css
-├── tests/
-│   └── core.test.mjs
 ├── package.json
 ├── README.md
 └── LICENSE
 ```
 
-## License and attribution
+## 🧪 Development and Testing
 
-Released under the MIT License. See [LICENSE](./LICENSE). The application currently declares no third-party runtime dependencies.
+The application uses native JavaScript modules and Node.js's built-in testing tools.
 
-## Author
+Run the test suite:
 
-Built by [Sidali Kharef](https://github.com/sidalikharef).
+```bash
+npm test
+```
 
-[Website](https://sidalikharef.cc/)
+Run syntax checks:
+
+```bash
+npm run check
+```
+
+The processing functions in `core.mjs` are independent of browser APIs and covered by automated unit tests.
+
+The last reported verification completed **10 passing core tests**, along with JavaScript syntax checks and browser smoke tests.
+
+## 🗺️ Roadmap
+
+Sidali DitherLab is actively evolving into a more comprehensive open-source image-processing toolkit.
+
+The following features are **planned and not yet implemented**.
+
+### Phase 1 — Advanced Dithering
+
+- [ ] Atkinson dithering.
+- [ ] Bayer ordered dithering.
+- [ ] Jarvis–Judice–Ninke.
+- [ ] Stucki, Burkes, and Sierra algorithms.
+- [ ] Custom color palettes.
+- [ ] Retro Game Boy-style color processing.
+- [ ] Additional creative image effects.
+
+### Phase 2 — Performance and Optimization
+
+- [ ] Web Worker processing.
+- [ ] Batch image conversion.
+- [ ] Additional export formats.
+- [ ] Improved image compression.
+- [ ] Performance benchmarks.
+- [ ] Reusable processing pipelines.
+
+### Phase 3 — Developer Toolkit
+
+- [ ] TypeScript processing library.
+- [ ] NPM package.
+- [ ] Command-line interface.
+- [ ] React integration.
+- [ ] Dedicated documentation.
+- [ ] Monorepo architecture.
+
+### Phase 4 — Sidali AutoLab
+
+**An experimental, local-first autonomous image-processing assistant.**
+
+Planned capabilities include:
+
+- [ ] Natural-language image-processing instructions.
+- [ ] Automatic dithering-parameter exploration.
+- [ ] Intelligent palette recommendations.
+- [ ] Automated compression experiments.
+- [ ] Visual quality evaluation.
+- [ ] Multi-candidate comparison.
+- [ ] Local AI model integration.
+- [ ] Optimization workflows without mandatory paid AI APIs.
+
+The long-term goal is to let users describe a desired visual result and have AutoLab explore suitable configurations automatically.
+
+## ⚠️ Current Limitations
+
+- Floyd–Steinberg is currently the only supported dithering algorithm.
+- WebP is the only export format.
+- Processing runs on the browser's main thread.
+- Large images may take additional processing time.
+- Browser Canvas limits and encoder support vary.
+- Batch processing, CLI tools, TypeScript packages, and AI features are not yet available.
+- Offline PWA support is not implemented.
+
+## 🤝 Contributing
+
+Contributions, bug reports, feature ideas, and improvements are welcome.
+
+You can participate by opening a GitHub issue, suggesting a new dithering algorithm, reporting a processing bug, or proposing improvements to the editor.
+
+Please keep changes focused, document behavioral changes, and run the available tests before submitting a pull request.
+
+**[View the repository on GitHub](https://github.com/sidalikharef/js-image-dithering-converter-and-compression)**
+
+## 📄 License
+
+Sidali DitherLab is released under the **MIT License**.
+
+See [LICENSE](./LICENSE) for the complete license terms and copyright notices.
+
+The current application declares no third-party runtime dependencies.
+
+## 👨‍💻 Author
+
+**Sidali Kharef**
+
+Software Developer & Open-Source Enthusiast
+
+Creator and maintainer of Sidali DitherLab.
+
+| Platform | Link |
+|---|---|
+| 🌐 Portfolio | [sidalikharef.cc](https://sidalikharef.cc) |
+| 💻 GitHub | [github.com/sidalikharef](https://github.com/sidalikharef) |
+| 💼 LinkedIn | [Sid Ali Kharef](https://www.linkedin.com/in/sid-ali-kharef-b5195419b/) |
+| 🚀 Live Application | [ditterlab.sidalikharef.cc](https://ditterlab.sidalikharef.cc) |
+
+---
+
+<div align="center">
+
+### Every Pixel, Perfected.
+
+Built with JavaScript, creativity, and a passion for image processing.
+
+**[Live Demo](https://ditterlab.sidalikharef.cc)** · **[Portfolio](https://sidalikharef.cc)** · **[GitHub](https://github.com/sidalikharef)** · **[LinkedIn](https://www.linkedin.com/in/sid-ali-kharef-b5195419b/)**
+
+**Open Source · MIT Licensed · Privacy First**
+
+</div>
