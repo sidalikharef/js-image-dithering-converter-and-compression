@@ -4,6 +4,8 @@ Turn images into expressive monochrome dithering with precision controls and opt
 
 ![Sidali Dither interface](./screenshots/application.png)
 
+[Live demo](https://sidalikharef.github.io/js-image-dithering-converter-and-compression/)
+
 ## Features
 
 - Load an image by selecting a file or dragging it onto the upload area.
