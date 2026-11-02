@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" fill="none">
+  <rect width="1200" height="630" fill="#0B0D0E"/>
+  <path d="M804 0h396v630H804z" fill="#111517"/>
+  <circle cx="1007" cy="315" r="220" stroke="#30363A"/>
+  <circle cx="1007" cy="315" r="162" stroke="#202426"/>
+  <g transform="translate(889 197) scale(3.65)" fill="#B6F36B">
+    <circle cx="32" cy="7" r="1.5"/><circle cx="39" cy="8" r="1.8" opacity=".78"/>
+    <circle cx="46" cy="12" r="2.1" opacity=".82"/><circle cx="51" cy="19" r="2.5"/>
+    <circle cx="54" cy="27" r="2.8"/><circle cx="53" cy="35" r="3.1"/>
+    <circle cx="49" cy="43" r="3.3"/><circle cx="43" cy="49" r="3.2"/>
+    <circle cx="35" cy="53" r="3"/><circle cx="27" cy="54" r="2.8" opacity=".88"/>
+    <circle cx="19" cy="51" r="2.5" opacity=".82"/><circle cx="13" cy="46" r="2.2" opacity=".78"/>
+    <circle cx="9" cy="39" r="2" opacity=".72"/><circle cx="8" cy="31" r="1.8" opacity=".68"/>
+    <circle cx="10" cy="23" r="1.6" opacity=".62"/><circle cx="14" cy="16" r="1.4" opacity=".56"/>
+    <circle cx="21" cy="11" r="1.2" opacity=".48"/><circle cx="27" cy="8" r="1" opacity=".4"/>
+    <circle cx="32" cy="32" r="5"/>
+  </g>
+  <circle cx="1006" cy="315" r="9" fill="#111517"/>
+  <circle cx="840" cy="172" r="4" fill="#B6F36B" opacity=".55"/>
+  <circle cx="1148" cy="425" r="3" fill="#B6F36B" opacity=".45"/>
+  <text x="88" y="113" fill="#B6F36B" font-family="Geist, Inter, Arial, sans-serif" font-size="16" font-weight="650" letter-spacing="3">PRIVATE IMAGE PROCESSING</text>
+  <text x="84" y="225" fill="#F4F5F4" font-family="Geist, Inter, Arial, sans-serif" font-size="67" font-weight="570" letter-spacing="-3">Sidali</text>
+  <text x="84" y="302" fill="#F4F5F4" font-family="Geist, Inter, Arial, sans-serif" font-size="67" font-weight="760" letter-spacing="-3">DitherLab</text>
+  <text x="88" y="366" fill="#A3AAAD" font-family="Geist, Inter, Arial, sans-serif" font-size="23" font-weight="500" letter-spacing=".5">Every Pixel, Perfected.</text>
+  <path d="M88 419h54" stroke="#B6F36B" stroke-width="3"/>
+  <text x="88" y="469" fill="#A3AAAD" font-family="Geist, Inter, Arial, sans-serif" font-size="16" letter-spacing=".7">DITHER · COMPARE · EXPORT</text>
+  <text x="88" y="510" fill="#7E888C" font-family="Geist, Inter, Arial, sans-serif" font-size="14">Local-first creative tools for every pixel.</text>
+  <rect x="88" y="548" width="186" height="36" rx="18" fill="#171A1C" stroke="#30363A"/>
+  <circle cx="108" cy="566" r="4" fill="#B6F36B"/>
+  <text x="122" y="571" fill="#F4F5F4" font-family="Geist, Inter, Arial, sans-serif" font-size="12" letter-spacing=".5">PROCESSING STAYS LOCAL</text>
+</svg>

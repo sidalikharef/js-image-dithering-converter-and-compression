@@ -3,63 +3,153 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <meta name="description" content="Turn images into expressive monochrome dithering with precision controls and optimized WebP export." />
-  <meta name="theme-color" content="#10131b" />
+  <meta name="description" content="Every Pixel, Perfected. Private, precision image processing with Sidali DitherLab." />
+  <meta name="theme-color" content="#0B0D0E" />
   <meta property="og:type" content="website" />
-  <meta property="og:title" content="Sidali Dither" />
-  <meta property="og:description" content="Turn images into expressive monochrome dithering with precision controls and optimized WebP export." />
+  <meta property="og:site_name" content="Sidali DitherLab" />
+  <meta property="og:title" content="Sidali DitherLab — Every Pixel, Perfected." />
+  <meta property="og:description" content="Every Pixel, Perfected. Private, precision image processing in your browser." />
+  <meta property="og:image" content="https://sidalikharef.github.io/js-image-dithering-converter-and-compression/assets/social-preview.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Sidali DitherLab — Every Pixel, Perfected." />
+  <meta name="twitter:image" content="https://sidalikharef.github.io/js-image-dithering-converter-and-compression/assets/social-preview.png" />
   <meta property="og:url" content="https://github.com/sidalikharef/js-image-dithering-converter-and-compression" />
   <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
-  <title>Sidali Dither</title>
+  <title>Sidali DitherLab</title>
   <link rel="stylesheet" href="styles.css" />
   <script type="module" src="main.js"></script>
 </head>
 <body>
-  <main class="shell">
+  <div class="app">
     <header class="topbar">
-      <a class="brand" href="./" aria-label="Sidali Dither home">
-        <span class="mark" aria-hidden="true">SD</span>
-        <span>Sidali Dither <small>IMAGE PROCESSING TOOL</small></span>
+      <a class="brand" href="./" aria-label="Sidali DitherLab home">
+        <img class="brand-logo" id="brandLogo" src="assets/dither-orbit-lockup-dark.svg" alt="Sidali DitherLab — Every Pixel, Perfected." width="240" height="44" />
       </a>
-      <a class="source" href="https://github.com/sidalikharef/js-image-dithering-converter-and-compression">View source <span aria-hidden="true">↗</span></a>
+      <div class="file-summary">
+        <strong id="filename">Untitled image</strong>
+        <span id="imageInfo">Local processing · Nothing uploaded</span>
+      </div>
+      <div class="toolbar" aria-label="Editor actions">
+        <button class="icon-button" id="undo" type="button" aria-label="Undo (Ctrl+Z)" title="Undo (Ctrl+Z)" disabled>↶</button>
+        <button class="icon-button" id="redo" type="button" aria-label="Redo (Ctrl+Shift+Z)" title="Redo (Ctrl+Shift+Z)" disabled>↷</button>
+        <span class="toolbar-divider" aria-hidden="true"></span>
+        <button class="icon-button theme-button" id="theme" type="button" aria-label="Switch to light theme" title="Switch theme">◐</button>
+        <a class="icon-button github-link" aria-label="View GitHub repository" title="View GitHub repository" href="https://github.com/sidalikharef/js-image-dithering-converter-and-compression" target="_blank" rel="noreferrer">↗</a>
+        <button class="export-button" id="download" type="button" disabled><span aria-hidden="true">↓</span> Export WebP</button>
+      </div>
     </header>
-    <section class="hero">
-      <span class="eyebrow">BROWSER-BASED IMAGE PROCESSING</span>
-      <h1>Pixels, with intention.</h1>
-      <p>Turn images into expressive monochrome dithering with precision controls and optimized WebP export.</p>
-    </section>
-    <div class="workspace">
-      <section class="panel controls" aria-label="Image controls">
-        <h2><span class="step">01</span> Source image</h2>
-        <label class="dropzone" id="dropzone" for="file">
-          <span class="upload-icon" aria-hidden="true">↑</span>
-          <strong>Choose an image</strong>
-          <span>or drag and drop here</span>
-          <small>PNG, JPEG, WebP and other browser-supported formats</small>
-          <input id="file" type="file" accept="image/*" aria-label="Choose an image to process" />
-        </label>
-        <div class="filename" id="filename">No image loaded</div>
-        <div class="section-head"><h2><span class="step">02</span> Adjust settings</h2><button type="button" class="text-button" id="reset">Reset</button></div>
-        <div class="control"><label for="width">Output width <output id="widthValue">1200 px</output></label><input id="width" type="range" min="300" max="2400" step="100" value="1200" /></div>
-        <div class="control"><label for="grain">Grain size <output id="grainValue">4 × 4 px</output></label><input id="grain" type="range" min="1" max="16" step="1" value="4" /><small>Process fewer pixels, then upscale with nearest-neighbor scaling.</small></div>
-        <div class="control"><label for="threshold">Black threshold <output id="thresholdValue">128</output></label><input id="threshold" type="range" min="40" max="220" step="1" value="128" /></div>
-        <div class="control"><label for="contrast">Contrast <output id="contrastValue">1.0×</output></label><input id="contrast" type="range" min="0.5" max="2" step="0.1" value="1" /></div>
-        <div class="control"><label for="strength">Diffusion strength <output id="strengthValue">100%</output></label><input id="strength" type="range" min="0" max="1" step="0.05" value="1" /></div>
-        <div class="control"><label for="quality">WebP quality <output id="qualityValue">75%</output></label><input id="quality" type="range" min="0.1" max="1" step="0.05" value="0.75" /><small>Quality controls encoding, not resolution or guaranteed file size.</small></div>
-        <button class="primary" id="download" disabled>↓ Download WebP</button>
-        <p class="status" id="status" role="status" aria-live="polite">Select an image to begin.</p>
+
+    <main class="editor">
+      <aside class="sidebar left-sidebar" aria-label="Image tools">
+        <div class="sidebar-heading"><span class="eyebrow">WORKSPACE</span><span class="privacy"><i></i> PRIVATE</span></div>
+        <section class="tool-section">
+          <h1>Image</h1>
+          <label class="dropzone" id="dropzone" for="file">
+            <span class="upload-icon" aria-hidden="true">↑</span>
+            <strong>Import image</strong>
+            <span>Drop a file or browse</span>
+            <small>Up to 40 MiB · stays on device</small>
+            <input id="file" type="file" accept="image/*" aria-label="Choose an image to process" />
+          </label>
+          <div class="source-actions"><span id="sourceName">No image selected</span></div>
+        </section>
+
+        <section class="tool-section">
+          <h2>Output size</h2>
+          <div class="control">
+            <label for="width">Width <output id="widthValue">1200 px</output></label>
+            <input id="width" type="range" min="300" max="2400" step="100" value="1200" />
+          </div>
+          <div class="control">
+            <label for="grain">Pixel size <output id="grainValue">4 × 4 px</output></label>
+            <input id="grain" type="range" min="1" max="16" step="1" value="4" />
+            <small>Smaller values create finer detail.</small>
+          </div>
+        </section>
+
+        <section class="tool-section tool-note">
+          <h2>Algorithm</h2>
+          <div class="algorithm-card"><span class="algorithm-icon" aria-hidden="true">⠿</span><span><strong>Floyd–Steinberg</strong><small>Error diffusion · monochrome</small></span><span class="active-dot" aria-label="Active"></span></div>
+          <p>Distributes quantization error to neighboring pixels for a natural, high-detail pattern.</p>
+        </section>
+
+        <div class="sidebar-bottom">
+          <button class="quiet-button" id="reset" type="button">Reset adjustments <span>⌘R</span></button>
+          <span class="privacy-note">Your images are processed locally and never sent to a server.</span>
+        </div>
+      </aside>
+
+      <section class="canvas-area" aria-label="Image preview">
+        <div class="canvas-toolbar">
+          <div class="view-tabs" role="group" aria-label="Preview mode">
+            <button type="button" class="view-tab active" data-view="processed" aria-pressed="true">Output</button>
+            <button type="button" class="view-tab" data-view="compare" aria-pressed="false">Compare</button>
+            <button type="button" class="view-tab" data-view="original" aria-pressed="false">Original</button>
+          </div>
+          <div class="zoom-tools" aria-label="Preview zoom">
+            <button class="icon-button" id="zoomOut" type="button" aria-label="Zoom out" title="Zoom out" disabled>−</button>
+            <button class="zoom-value" id="zoomValue" type="button" title="Fit image to canvas" disabled>Fit</button>
+            <button class="icon-button" id="zoomIn" type="button" aria-label="Zoom in" title="Zoom in" disabled>+</button>
+          </div>
+        </div>
+        <div class="canvas-wrap" id="canvasWrap">
+          <div class="empty-state" id="placeholder">
+            <div class="empty-art" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+            <strong>Your canvas is ready</strong>
+            <p>Import an image to start creating.</p>
+            <label class="browse-button" for="file">Browse files</label>
+            <small>PNG, JPEG, WebP and other browser-supported formats</small>
+          </div>
+          <div class="canvas-stage" id="canvasStage" hidden>
+            <canvas id="originalCanvas" aria-label="Original image"></canvas>
+            <canvas id="outputCanvas" aria-label="Processed image preview"></canvas>
+            <div class="compare-line" id="compareLine" hidden><span>BEFORE</span><i></i><span>AFTER</span></div>
+          </div>
+          <div class="compare-control" id="compareControl" hidden>
+            <label for="compare">Before / after</label><input id="compare" type="range" min="0" max="100" value="50" /><output id="compareValue">50%</output>
+          </div>
+        </div>
+        <div class="canvas-footer">
+          <span class="canvas-status"><i id="statusDot"></i><span id="status" role="status" aria-live="polite">Select an image to begin.</span></span>
+          <span id="dimensions">—</span>
+        </div>
       </section>
-      <section class="panel preview-panel" aria-label="Preview">
-        <div class="preview-header"><div><h2>Output preview</h2><p>Black pixels · Transparent background</p></div><span id="format" class="pill">WEBP</span></div>
-        <div class="canvas-wrap" id="canvasWrap"><div class="placeholder" id="placeholder"><span>▦</span><strong>Your preview appears here</strong><small>The checkerboard indicates transparency.</small></div><canvas id="outputCanvas" hidden aria-label="Processed image preview"></canvas></div>
-        <div class="stats"><div><small>DIMENSIONS</small><strong id="dimensions">—</strong></div><div><small>ACTUAL FILE SIZE</small><strong id="filesize">—</strong></div><div><small>30 KiB TARGET</small><strong id="target">—</strong></div></div>
-        <div class="notice">A 30 KiB output cannot be guaranteed: sharp dot patterns and transparency may compress poorly. Check the reported size before downloading.</div>
-      </section>
-    </div>
-    <footer>
-      <span>MIT licensed · HTML, CSS, JavaScript and Canvas · Processing stays in your browser</span>
-      <a href="https://github.com/sidalikharef">Built by Sidali Kharef</a>
-    </footer>
-  </main>
+
+      <aside class="sidebar right-sidebar" aria-label="Image properties">
+        <div class="properties-heading"><span class="eyebrow">PROPERTIES</span><button class="text-button" id="resetProperties" type="button">Reset</button></div>
+        <section class="tool-section">
+          <h2>Dithering</h2>
+          <div class="control">
+            <label for="threshold">Black threshold <output id="thresholdValue">128</output></label>
+            <input id="threshold" type="range" min="40" max="220" step="1" value="128" />
+            <small>Sets the luminance cutoff for black pixels.</small>
+          </div>
+          <div class="control">
+            <label for="contrast">Contrast <output id="contrastValue">1.0×</output></label>
+            <input id="contrast" type="range" min="0.5" max="2" step="0.1" value="1" />
+          </div>
+          <div class="control">
+            <label for="strength">Diffusion <output id="strengthValue">100%</output></label>
+            <input id="strength" type="range" min="0" max="1" step="0.05" value="1" />
+            <small>Controls how much quantization error is spread.</small>
+          </div>
+        </section>
+        <section class="tool-section export-settings">
+          <h2>Export</h2>
+          <div class="format-row"><span>Format</span><strong><i></i> WebP</strong></div>
+          <div class="control">
+            <label for="quality">Quality <output id="qualityValue">75%</output></label>
+            <input id="quality" type="range" min="0.1" max="1" step="0.05" value="0.75" />
+            <small>Adjusts encoding quality, not resolution.</small>
+          </div>
+          <div class="export-stats"><span>File size</span><strong id="filesize">—</strong></div>
+          <div class="export-stats"><span>30 KiB target</span><strong id="target">—</strong></div>
+        </section>
+        <div class="sidebar-bottom properties-bottom">
+          <span class="version-label">SIDALI DITHERLAB <span>·</span> BROWSER EDITION</span>
+        </div>
+      </aside>
+    </main>
+  </div>
 </body>
 </html>
