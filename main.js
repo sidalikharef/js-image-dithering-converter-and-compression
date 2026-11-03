@@ -1,11 +1,12 @@
-import {outputDimensions, processingDimensions, ditherToTransparentBlack, formatBytes} from './core.mjs';
+import {outputDimensions, processingDimensions, formatBytes} from './core.mjs';
+import {ALGORITHMS, getAlgorithm, processImage} from './src/engine/registry.mjs';
+import {PRESETS, getPreset} from './src/engine/presets.mjs';
+import {createHistory} from './src/engine/history.mjs';
 
 const $ = id => document.getElementById(id);
-const controls = ['width', 'grain', 'threshold', 'contrast', 'strength', 'quality'];
-const defaults = {width:1200, grain:4, threshold:128, contrast:1, strength:1, quality:.75};
-const undoStack = [];
-const redoStack = [];
-const historyLimit = 50;
+const controls = ['width', 'grain', 'threshold', 'contrast', 'strength', 'quality', 'algorithm', 'matrixSize', 'orderedStrength', 'seed', 'randomness', 'serpentine', 'preset'];
+const defaults = {width:1200, grain:4, threshold:128, contrast:1, strength:1, quality:.75, algorithm:'floyd-steinberg', matrixSize:4, orderedStrength:1, seed:1, randomness:1, serpentine:false, preset:''};
+const history = createHistory(defaults);
 let source = null;
 let sourceName = 'image';
 let sourceFileSize = 0;
@@ -14,10 +15,18 @@ let renderSerial = 0;
 let debounceTimer;
 let zoom = 1;
 let fitZoom = true;
-let lastCommittedSettings = {...defaults};
+let processingDuration = 0;
+let encodingDuration = 0;
+let comparisonSerial = 0;
 
 function getSettings() {
-  return Object.fromEntries(controls.map(id => [id, Number($(id).value)]));
+  return Object.fromEntries(controls.map(id => {
+    const element = $(id);
+    if (!element) return [id, defaults[id]];
+    if (element.type === 'checkbox') return [id, element.checked];
+    if (id === 'algorithm' || id === 'preset') return [id, element.value];
+    return [id, Number(element.value)];
+  }));
 }
 
 function sameSettings(a, b) {
@@ -25,23 +34,23 @@ function sameSettings(a, b) {
 }
 
 function updateHistoryButtons() {
-  $('undo').disabled = undoStack.length === 0;
-  $('redo').disabled = redoStack.length === 0;
+  $('undo').disabled = !history.canUndo;
+  $('redo').disabled = !history.canRedo;
 }
 
 function commitSettings() {
   const current = getSettings();
-  if (sameSettings(current, lastCommittedSettings)) return;
-  undoStack.push({...lastCommittedSettings});
-  if (undoStack.length > historyLimit) undoStack.shift();
-  redoStack.length = 0;
-  lastCommittedSettings = current;
+  if (!history.push(current)) return;
   updateHistoryButtons();
 }
 
 function applySettings(settings) {
-  for (const id of controls) $(id).value = settings[id];
-  lastCommittedSettings = {...settings};
+  for (const id of controls) {
+    const element = $(id);
+    if (!element) continue;
+    if (element.type === 'checkbox') element.checked = !!settings[id];
+    else element.value = settings[id] ?? defaults[id];
+  }
   updateLabels();
   updateHistoryButtons();
   scheduleRender();
@@ -54,6 +63,150 @@ function updateLabels() {
   $('contrastValue').textContent = `${Number($('contrast').value).toFixed(1)}×`;
   $('strengthValue').textContent = `${Math.round(Number($('strength').value)*100)}%`;
   $('qualityValue').textContent = `${Math.round(Number($('quality').value)*100)}%`;
+  if ($('algorithm')) {
+    $('algorithmValue').textContent = $('algorithm').value === 'floyd-steinberg' ? 'Floyd–Steinberg' : $('algorithm').options[$('algorithm').selectedIndex].text;
+    const isBayer = $('algorithm').value === 'bayer';
+    const isRandom = $('algorithm').value === 'random';
+    $('matrixSizeWrap').hidden = !isBayer;
+    $('orderedStrengthWrap').hidden = !isBayer;
+    $('strengthWrap').hidden = isBayer || isRandom;
+    $('randomWrap').hidden = !isRandom;
+    $('seedWrap').hidden = !isRandom;
+    $('serpentineWrap').hidden = $('algorithm').value === 'bayer' || $('algorithm').value === 'random';
+    const algorithm = getAlgorithm($('algorithm').value);
+    $('algorithmDescription').textContent = algorithm.description;
+    $('algorithmCategory').textContent = algorithm.category;
+    $('activeAlgorithmName').textContent = algorithm.name;
+    $('activeAlgorithmCategory').textContent = algorithm.category;
+    $('activeAlgorithmDescription').textContent = algorithm.description;
+  }
+  if ($('randomness')) $('randomnessValue').textContent = `${Math.round(Number($('randomness').value)*100)}%`;
+  if ($('matrixSize')) $('matrixSizeValue').textContent = `${$('matrixSize').value}×${$('matrixSize').value}`;
+  if ($('orderedStrength')) $('orderedStrengthValue').textContent = `${Math.round(Number($('orderedStrength').value)*100)}%`;
+  if ($('seed')) $('seedValue').textContent = $('seed').value;
+}
+
+function resolveAlgorithmSettings(settings) {
+  return {
+    threshold: settings.threshold,
+    contrast: settings.contrast,
+    strength: settings.strength,
+    serpentine: !!settings.serpentine,
+    matrixSize: Number(settings.matrixSize),
+    orderedStrength: settings.orderedStrength,
+    seed: Number(settings.seed),
+    randomness: settings.randomness,
+  };
+}
+
+function populateSelectors() {
+  const algorithmSelect = $('algorithm');
+  algorithmSelect.replaceChildren();
+  const categories = new Map();
+  for (const algorithm of ALGORITHMS) {
+    if (!categories.has(algorithm.category)) {
+      const group = document.createElement('optgroup');
+      group.label = algorithm.category;
+      categories.set(algorithm.category, group);
+      algorithmSelect.append(group);
+    }
+    const option = document.createElement('option');
+    option.value = algorithm.id;
+    option.textContent = algorithm.name;
+    option.title = algorithm.description;
+    categories.get(algorithm.category).append(option);
+  }
+  const presetSelect = $('preset');
+  presetSelect.replaceChildren(new Option('Custom settings', ''));
+  for (const preset of PRESETS) presetSelect.add(new Option(preset.name, preset.id));
+}
+
+function applyPreset(presetId) {
+  const preset = getPreset(presetId);
+  const next = {...getSettings(), ...preset.settings, preset:preset.id};
+  history.push(next);
+  applySettings(next);
+}
+
+function populateComparisonSelectors() {
+  for (const id of ['compareAlgorithmA', 'compareAlgorithmB']) {
+    const select = $(id);
+    select.replaceChildren();
+    for (const algorithm of ALGORITHMS) select.add(new Option(algorithm.name, algorithm.id));
+  }
+  $('compareAlgorithmA').value = 'floyd-steinberg';
+  $('compareAlgorithmB').value = 'atkinson';
+}
+
+async function renderAlgorithmComparison() {
+  if (!source) {
+    $('compareStatus').textContent = 'Import an image before comparing algorithms.';
+    return;
+  }
+  const serial = ++comparisonSerial;
+  const settings = getSettings();
+  const algorithmA = $('compareAlgorithmA').value;
+  const algorithmB = $('compareAlgorithmB').value;
+  const dimensions = outputDimensions(source.width, source.height, settings.width);
+  const scale = Math.min(1, 512 / dimensions.width, 512 / dimensions.height);
+  const previewWidth = Math.max(1, Math.round(dimensions.width * scale));
+  const previewHeight = Math.max(1, Math.round(dimensions.height * scale));
+  const logical = processingDimensions(previewWidth, previewHeight, Math.max(1, Math.round(settings.grain * scale)));
+  $('compareStatus').textContent = 'Rendering algorithm previews…';
+  $('runAlgorithmCompare').disabled = true;
+
+  try {
+    const sample = document.createElement('canvas');
+    sample.width = logical.width;
+    sample.height = logical.height;
+    const sampleContext = sample.getContext('2d', {willReadFrequently:true});
+    if (!sampleContext) throw new Error('Could not initialize comparison processing canvas.');
+    sampleContext.drawImage(source, 0, 0, logical.width, logical.height);
+    const pixels = sampleContext.getImageData(0, 0, logical.width, logical.height);
+    const previewSettings = resolveAlgorithmSettings(settings);
+    const outputA = processImage(pixels, algorithmA, previewSettings);
+    const outputB = processImage(pixels, algorithmB, previewSettings);
+
+    for (const [canvasId, output, algorithmId, labelId] of [
+      ['compareCanvasA', outputA, algorithmA, 'compareLabelA'],
+      ['compareCanvasB', outputB, algorithmB, 'compareLabelB']
+    ]) {
+      const canvas = $(canvasId);
+      canvas.width = previewWidth;
+      canvas.height = previewHeight;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Could not initialize a comparison preview canvas.');
+      context.clearRect(0, 0, previewWidth, previewHeight);
+      context.imageSmoothingEnabled = false;
+      context.putImageData(new ImageData(output.data, output.width, output.height), 0, 0);
+      if (output.width !== previewWidth || output.height !== previewHeight) {
+        const small = document.createElement('canvas');
+        small.width = output.width;
+        small.height = output.height;
+        const smallContext = small.getContext('2d');
+        if (!smallContext) throw new Error('Could not scale a comparison preview.');
+        smallContext.putImageData(new ImageData(output.data, output.width, output.height), 0, 0);
+        context.drawImage(small, 0, 0, previewWidth, previewHeight);
+      }
+      $(labelId).textContent = getAlgorithm(algorithmId).name;
+    }
+    if (serial === comparisonSerial) {
+      $('compareStatus').textContent = `Rendered ${previewWidth} × ${previewHeight} previews from the original image.`;
+    }
+  } catch (error) {
+    if (serial === comparisonSerial) $('compareStatus').textContent = error instanceof Error ? error.message : 'Comparison rendering failed.';
+  } finally {
+    if (serial === comparisonSerial) $('runAlgorithmCompare').disabled = false;
+  }
+}
+
+function applyComparisonResult(side) {
+  const algorithm = $(side === 'a' ? 'compareAlgorithmA' : 'compareAlgorithmB').value;
+  const next = {...getSettings(), algorithm, preset:''};
+  history.push(next);
+  applySettings(next);
+  $('preset').value = '';
+  $('algorithmCompare').close();
 }
 
 function canvasToWebP(canvas, quality) {
@@ -128,6 +281,10 @@ async function render() {
   $('download').disabled = true;
   if (!source) return;
   const settings = getSettings();
+  $('processingTime').textContent = '—';
+  $('encodingTime').textContent = '—';
+  $('metricAlgorithm').textContent = getAlgorithm(settings.algorithm).name;
+  $('metricPreset').textContent = settings.preset ? getPreset(settings.preset).name : 'Custom';
   $('status').textContent = 'Rendering image…';
   $('statusDot').className = 'processing';
   try {
@@ -143,7 +300,9 @@ async function render() {
     if (!lowContext) throw new Error('Could not initialize the processing canvas.');
     lowContext.drawImage(source, 0, 0, logical.width, logical.height);
     const pixels = lowContext.getImageData(0, 0, logical.width, logical.height);
-    const dithered = ditherToTransparentBlack(pixels, settings);
+    const processStart = performance.now();
+    const dithered = processImage(pixels, settings.algorithm, resolveAlgorithmSettings(settings));
+    processingDuration = performance.now() - processStart;
     lowContext.putImageData(new ImageData(dithered.data, logical.width, logical.height), 0, 0);
 
     const originalCanvas = $('originalCanvas');
@@ -159,7 +318,9 @@ async function render() {
     outputContext.imageSmoothingEnabled = false;
     outputContext.drawImage(low, 0, 0, dimensions.width, dimensions.height);
 
+    const encodingStart = performance.now();
     const blob = await canvasToWebP(outputCanvas, settings.quality);
+    encodingDuration = performance.now() - encodingStart;
     if (serial !== renderSerial) return;
     latestBlob = blob;
     $('placeholder').hidden = true;
@@ -167,6 +328,10 @@ async function render() {
     $('dimensions').textContent = `${dimensions.width} × ${dimensions.height}`;
     $('imageInfo').textContent = `${source.width} × ${source.height} px · ${formatBytes(sourceFileSize)}`;
     $('filesize').textContent = formatBytes(blob.size);
+    $('processingTime').textContent = `${processingDuration.toFixed(2)} ms`;
+    $('encodingTime').textContent = `${encodingDuration.toFixed(2)} ms`;
+    $('metricAlgorithm').textContent = getAlgorithm(settings.algorithm).name;
+    $('metricPreset').textContent = settings.preset ? getPreset(settings.preset).name : 'Custom';
     $('target').textContent = blob.size < 30 * 1024 ? 'Under target' : 'Above target';
     $('target').className = blob.size < 30 * 1024 ? 'target-good' : '';
     $('download').disabled = false;
@@ -197,38 +362,45 @@ function scheduleRender() {
   ++renderSerial;
   latestBlob = null;
   $('download').disabled = true;
+  $('processingTime').textContent = '—';
+  $('encodingTime').textContent = '—';
   clearTimeout(debounceTimer);
   debounceTimer = setTimeout(render, 130);
 }
 
 function resetSettings() {
-  commitSettings();
   const current = getSettings();
   if (sameSettings(current, defaults)) return;
-  undoStack.push({...current});
-  if (undoStack.length > historyLimit) undoStack.shift();
-  redoStack.length = 0;
+  history.push(defaults);
   applySettings(defaults);
 }
 
 for (const id of controls) {
-  $(id).addEventListener('input', () => {updateLabels(); scheduleRender();});
-  $(id).addEventListener('change', commitSettings);
+  const el = $(id);
+  if (!el) continue;
+  if (id === 'preset') {
+    el.addEventListener('change', () => {
+      if (el.value) applyPreset(el.value);
+    });
+    continue;
+  }
+  el.addEventListener('input', () => {
+    if (id !== 'quality' && $('preset').value) $('preset').value = '';
+    updateLabels();
+    scheduleRender();
+  });
+  el.addEventListener('change', commitSettings);
 }
 $('reset').addEventListener('click', resetSettings);
 $('resetProperties').addEventListener('click', resetSettings);
 $('undo').addEventListener('click', () => {
-  commitSettings();
-  const previous = undoStack.pop();
+  const previous = history.undo();
   if (!previous) return;
-  redoStack.push(getSettings());
   applySettings(previous);
 });
 $('redo').addEventListener('click', () => {
-  commitSettings();
-  const next = redoStack.pop();
+  const next = history.redo();
   if (!next) return;
-  undoStack.push(getSettings());
   applySettings(next);
 });
 
@@ -295,6 +467,17 @@ for (const button of document.querySelectorAll('.view-tab')) {
   button.addEventListener('click', () => setView(button.dataset.view));
 }
 $('compare').addEventListener('input', updateComparison);
+$('algorithmCompareOpen').addEventListener('click', () => {
+  $('algorithmCompare').showModal();
+  renderAlgorithmComparison();
+});
+$('algorithmCompareClose').addEventListener('click', () => $('algorithmCompare').close());
+$('runAlgorithmCompare').addEventListener('click', renderAlgorithmComparison);
+for (const button of document.querySelectorAll('.apply-compare')) {
+  button.addEventListener('click', () => applyComparisonResult(button.dataset.apply));
+}
+$('compareAlgorithmA').addEventListener('change', renderAlgorithmComparison);
+$('compareAlgorithmB').addEventListener('change', renderAlgorithmComparison);
 $('zoomIn').addEventListener('click', () => {
   fitZoom = false;
   zoom = Math.min(4, zoom * 1.25);
@@ -334,5 +517,8 @@ window.addEventListener('keydown', event => {
   }
 });
 
+updateLabels();
+populateSelectors();
+populateComparisonSelectors();
 updateLabels();
 updateHistoryButtons();

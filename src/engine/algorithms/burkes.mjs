@@ -1,0 +1,4 @@
+import {diffuseError} from '../utilities/error-diffusion.mjs';
+import {ERROR_DIFFUSION_KERNELS} from '../utilities/kernels.mjs';
+
+export const burkes = (image, settings) => diffuseError(image, settings, ERROR_DIFFUSION_KERNELS.burkes);

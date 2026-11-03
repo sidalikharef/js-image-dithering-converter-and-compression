@@ -57,6 +57,10 @@
         <section class="tool-section">
           <h2>Output size</h2>
           <div class="control">
+            <label for="preset">Preset</label>
+            <select id="preset" aria-label="Select a processing preset"><option value="">Custom settings</option></select>
+          </div>
+          <div class="control">
             <label for="width">Width <output id="widthValue">1200 px</output></label>
             <input id="width" type="range" min="300" max="2400" step="100" value="1200" />
           </div>
@@ -69,8 +73,8 @@
 
         <section class="tool-section tool-note">
           <h2>Algorithm</h2>
-          <div class="algorithm-card"><span class="algorithm-icon" aria-hidden="true">⠿</span><span><strong>Floyd–Steinberg</strong><small>Error diffusion · monochrome</small></span><span class="active-dot" aria-label="Active"></span></div>
-          <p>Distributes quantization error to neighboring pixels for a natural, high-detail pattern.</p>
+          <div class="algorithm-card"><span class="algorithm-icon" aria-hidden="true">⠿</span><span><strong id="activeAlgorithmName">Floyd–Steinberg</strong><small id="activeAlgorithmCategory">Error diffusion</small></span><span class="active-dot" aria-label="Active"></span></div>
+          <p id="activeAlgorithmDescription">Classic balanced error diffusion.</p>
         </section>
 
         <div class="sidebar-bottom">
@@ -85,6 +89,7 @@
             <button type="button" class="view-tab active" data-view="processed" aria-pressed="true">Output</button>
             <button type="button" class="view-tab" data-view="compare" aria-pressed="false">Compare</button>
             <button type="button" class="view-tab" data-view="original" aria-pressed="false">Original</button>
+            <button type="button" class="view-tab" id="algorithmCompareOpen" aria-haspopup="dialog">Algorithm comparison</button>
           </div>
           <div class="zoom-tools" aria-label="Preview zoom">
             <button class="icon-button" id="zoomOut" type="button" aria-label="Zoom out" title="Zoom out" disabled>−</button>
@@ -120,6 +125,22 @@
         <section class="tool-section">
           <h2>Dithering</h2>
           <div class="control">
+            <label for="algorithm">Algorithm <output id="algorithmValue">Floyd–Steinberg</output></label>
+            <select id="algorithm" aria-label="Select algorithm">
+              <option value="floyd-steinberg" selected>Floyd–Steinberg</option>
+              <option value="atkinson">Atkinson</option>
+              <option value="jarvis-judice-ninke">Jarvis–Judice–Ninke</option>
+              <option value="stucki">Stucki</option>
+              <option value="burkes">Burkes</option>
+              <option value="sierra">Sierra</option>
+              <option value="sierra-lite">Sierra Lite</option>
+              <option value="bayer">Bayer Ordered</option>
+              <option value="random">Seeded Random</option>
+            </select>
+            <small id="algorithmDescription">Classic balanced error diffusion.</small>
+            <small id="algorithmCategory">Error diffusion</small>
+          </div>
+          <div class="control">
             <label for="threshold">Black threshold <output id="thresholdValue">128</output></label>
             <input id="threshold" type="range" min="40" max="220" step="1" value="128" />
             <small>Sets the luminance cutoff for black pixels.</small>
@@ -128,10 +149,34 @@
             <label for="contrast">Contrast <output id="contrastValue">1.0×</output></label>
             <input id="contrast" type="range" min="0.5" max="2" step="0.1" value="1" />
           </div>
-          <div class="control">
+          <div class="control" id="strengthWrap">
             <label for="strength">Diffusion <output id="strengthValue">100%</output></label>
             <input id="strength" type="range" min="0" max="1" step="0.05" value="1" />
             <small>Controls how much quantization error is spread.</small>
+          </div>
+          <div class="control" id="matrixSizeWrap" hidden>
+            <label for="matrixSize">Matrix size <output id="matrixSizeValue">4×4</output></label>
+            <select id="matrixSize" aria-label="Bayer matrix size">
+              <option value="2">2×2</option>
+              <option value="4" selected>4×4</option>
+              <option value="8">8×8</option>
+            </select>
+          </div>
+          <div class="control" id="orderedStrengthWrap" hidden>
+            <label for="orderedStrength">Ordered strength <output id="orderedStrengthValue">100%</output></label>
+            <input id="orderedStrength" type="range" min="0" max="1" step="0.05" value="1" />
+          </div>
+          <div class="control" id="randomWrap" hidden>
+            <label for="randomness">Randomness <output id="randomnessValue">100%</output></label>
+            <input id="randomness" type="range" min="0" max="1" step="0.05" value="1" />
+          </div>
+          <div class="control" id="seedWrap" hidden>
+            <label for="seed">Seed <output id="seedValue">1</output></label>
+            <input id="seed" type="number" min="0" max="4294967295" step="1" value="1" />
+          </div>
+          <div class="control" id="serpentineWrap">
+            <label for="serpentine">Serpentine scanning</label>
+            <input id="serpentine" type="checkbox" aria-label="Enable serpentine scanning" />
           </div>
         </section>
         <section class="tool-section export-settings">
@@ -144,12 +189,38 @@
           </div>
           <div class="export-stats"><span>File size</span><strong id="filesize">—</strong></div>
           <div class="export-stats"><span>30 KiB target</span><strong id="target">—</strong></div>
+          <div class="export-stats"><span>Processing</span><strong id="processingTime">—</strong></div>
+          <div class="export-stats"><span>Encoding</span><strong id="encodingTime">—</strong></div>
+          <div class="export-stats"><span>Algorithm</span><strong id="metricAlgorithm">—</strong></div>
+          <div class="export-stats"><span>Preset</span><strong id="metricPreset">Custom</strong></div>
         </section>
         <div class="sidebar-bottom properties-bottom">
           <span class="version-label">SIDALI DITHERLAB <span>·</span> BROWSER EDITION</span>
         </div>
       </aside>
     </main>
+    <dialog id="algorithmCompare" class="algorithm-compare-dialog" aria-labelledby="algorithmCompareTitle">
+      <div class="compare-dialog-header">
+        <div><span class="eyebrow">STUDIO</span><h2 id="algorithmCompareTitle">Algorithm comparison</h2></div>
+        <button class="icon-button" id="algorithmCompareClose" type="button" aria-label="Close comparison">×</button>
+      </div>
+      <div class="compare-selectors">
+        <label>Algorithm A<select id="compareAlgorithmA"></select></label>
+        <label>Algorithm B<select id="compareAlgorithmB"></select></label>
+        <button class="export-button" id="runAlgorithmCompare" type="button">Render comparison</button>
+      </div>
+      <p class="compare-dialog-status" id="compareStatus" role="status">Import an image to compare algorithms.</p>
+      <div class="algorithm-compare-results">
+        <article class="algorithm-result">
+          <header><strong id="compareLabelA">Algorithm A</strong><button class="text-button apply-compare" data-apply="a" type="button">Apply to editor</button></header>
+          <canvas id="compareCanvasA" aria-label="Algorithm A output"></canvas>
+        </article>
+        <article class="algorithm-result">
+          <header><strong id="compareLabelB">Algorithm B</strong><button class="text-button apply-compare" data-apply="b" type="button">Apply to editor</button></header>
+          <canvas id="compareCanvasB" aria-label="Algorithm B output"></canvas>
+        </article>
+      </div>
+    </dialog>
   </div>
 </body>
 </html>

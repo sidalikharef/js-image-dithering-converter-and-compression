@@ -27,7 +27,7 @@ Transform images into beautiful monochrome, pixelated artwork with precision con
 
 **Sidali DitherLab** is a lightweight, privacy-first image-processing application built with vanilla JavaScript, HTML, and CSS.
 
-It provides precise Floyd–Steinberg dithering with adjustable output settings, interactive image comparisons, and WebP optimization.
+It provides nine monochrome dithering algorithms, six built-in presets, algorithm-to-algorithm and original/output comparisons, adjustable processing controls, and WebP optimization.
 
 Everything runs locally in your browser. Your images are processed on your device without being uploaded to a server.
 
@@ -57,13 +57,22 @@ No installation, account, or image upload to a server required.
 
 ![Sidali DitherLab Mobile Editor](./assets/screenshots/mobile-editor.png)
 
+### Algorithm Comparison
+
+![Sidali DitherLab algorithm comparison](./assets/screenshots/algorithm-comparison.png)
+
 > The screenshots were captured from the actual running application using original sample artwork included in this repository.
 
 ## ⚡ Features
 
 ### 🎨 Image Processing
 
-- **Floyd–Steinberg dithering:** Convert images into detailed monochrome artwork using error diffusion.
+- **Nine algorithms:** Floyd–Steinberg, Atkinson, Jarvis–Judice–Ninke, Stucki, Burkes, Sierra, Sierra Lite, Bayer Ordered, and Seeded Random.
+- **Algorithm selector:** Algorithms are grouped by error-diffusion, ordered, and stochastic families, with descriptions and relevant controls.
+- **Algorithm-specific controls:** Error-diffusion strength and optional serpentine scan; Bayer 2×2, 4×4, and 8×8 matrices and ordered strength; seeded random value and randomness strength.
+- **Built-in presets:** Classic Mono, Retro Macintosh, Newspaper Texture, Soft Diffusion, Sharp Pixel Mono, and Experimental Noise.
+- **Algorithm comparison:** Render two algorithms from the same original image at a bounded preview resolution and apply either result to the editor.
+- **Processing metrics:** Actual algorithm time, separate WebP encoding duration, output dimensions, and encoded file size.
 - **Adjustable output dimensions:** Resize images while preserving their aspect ratio.
 - **Pixel-size control:** Create fine-grained dithering or bold pixelated styles.
 - **Black threshold:** Control the balance between black and transparent pixels.
@@ -142,21 +151,23 @@ No `npm install`, build process, or external runtime dependencies are required t
 
 ## 🧠 How Dithering Works
 
-Sidali DitherLab currently uses the **Floyd–Steinberg error-diffusion algorithm**.
+Sidali DitherLab always processes the decoded original image rather than feeding a previous dithered output back into the engine:
 
 The processing pipeline follows these steps:
 
 1. Resize the original image to the requested output dimensions while preserving its aspect ratio.
 2. Reduce the image to a logical pixel grid.
 3. Calculate pixel luminance and apply contrast.
-4. Quantize each pixel into black or transparent.
-5. Distribute quantization error to neighboring pixels.
+4. Quantize each pixel into black or transparent with the selected algorithm.
+5. Apply the selected error-diffusion kernel, Bayer ordered threshold matrix, or seeded stochastic threshold.
 6. Scale the result using nearest-neighbor interpolation.
 7. Encode the final image as WebP.
 
 ### Error Diffusion Matrix
 
-The Floyd–Steinberg algorithm distributes error according to the following pattern:
+Error-diffusion kernels include Floyd–Steinberg (16), Atkinson (6/8 propagated error), Jarvis–Judice–Ninke (48), Stucki (42), Burkes (32), Sierra (32), and Sierra Lite (4). Optional serpentine scanning mirrors horizontal kernel offsets on alternate rows.
+
+The Floyd–Steinberg kernel distributes error according to:
 
 ```text
              X    7/16
@@ -167,7 +178,7 @@ Where `X` represents the currently processed pixel.
 
 Fractional error is preserved using a `Float32Array`, preventing premature clamping during diffusion.
 
-The diffusion-strength setting controls how much error is propagated.
+The diffusion-strength setting controls how much error is propagated. Bayer uses a repeating 2×2, 4×4, or 8×8 threshold matrix; its ordered-strength control blends to ordinary thresholding at zero. Seeded Random uses a deterministic PRNG, so the same input and seed reproduce the same output.
 
 Fully transparent source pixels are composited against white for luminance calculations.
 
@@ -210,11 +221,24 @@ sidali-ditherlab/
 │       ├── editor-dark.png
 │       ├── editor-light.png
 │       ├── compare-view.png
-│       └── mobile-editor.png
+│       ├── mobile-editor.png
+│       └── algorithm-comparison.png
 ├── screenshots/
 │   └── application.png
 ├── tests/
-│   └── core.test.mjs
+│   ├── fixtures/
+│   ├── core.test.mjs
+│   └── engine.test.mjs
+├── benchmarks/
+│   └── algorithms.mjs
+├── src/
+│   └── engine/
+│       ├── algorithms/
+│       ├── utilities/
+│       ├── history.mjs
+│       ├── presets.mjs
+│       ├── registry.mjs
+│       └── validation.mjs
 ├── index.html
 ├── main.js
 ├── core.mjs
@@ -240,36 +264,36 @@ Run syntax checks:
 npm run check
 ```
 
-The processing functions in `core.mjs` are independent of browser APIs and covered by automated unit tests.
+The legacy Floyd–Steinberg API remains in `core.mjs` for compatibility. The modular engine in `src/engine` is independent of browser APIs and is tested with Node.js fixtures.
 
-The last reported verification completed **10 passing core tests**, along with JavaScript syntax checks and browser smoke tests.
+Run the deterministic median benchmark for all algorithms at 256×256, 512×512, and 1024×1024:
+
+```bash
+npm run benchmark
+```
+
+The benchmark runs one warm-up and three measured iterations per case; it prints measurements from the current machine and does not encode or assert performance claims.
 
 ## 🗺️ Roadmap
 
 Sidali DitherLab is actively evolving into a more comprehensive open-source image-processing toolkit.
 
-The following features are **planned and not yet implemented**.
+The following larger product features remain planned and are not part of this browser-only phase.
 
-### Phase 1 — Advanced Dithering
+### Future Processing Features
 
-- [ ] Atkinson dithering.
-- [ ] Bayer ordered dithering.
-- [ ] Jarvis–Judice–Ninke.
-- [ ] Stucki, Burkes, and Sierra algorithms.
 - [ ] Custom color palettes.
 - [ ] Retro Game Boy-style color processing.
 - [ ] Additional creative image effects.
 
-### Phase 2 — Performance and Optimization
+### Future Performance and Optimization
 
 - [ ] Web Worker processing.
 - [ ] Batch image conversion.
 - [ ] Additional export formats.
 - [ ] Improved image compression.
-- [ ] Performance benchmarks.
-- [ ] Reusable processing pipelines.
 
-### Phase 3 — Developer Toolkit
+### Future Developer Toolkit
 
 - [ ] TypeScript processing library.
 - [ ] NPM package.
@@ -278,7 +302,7 @@ The following features are **planned and not yet implemented**.
 - [ ] Dedicated documentation.
 - [ ] Monorepo architecture.
 
-### Phase 4 — Sidali AutoLab
+### Future Sidali AutoLab
 
 **An experimental, local-first autonomous image-processing assistant.**
 
@@ -297,11 +321,12 @@ The long-term goal is to let users describe a desired visual result and have Aut
 
 ## ⚠️ Current Limitations
 
-- Floyd–Steinberg is currently the only supported dithering algorithm.
+- Processing runs on the browser's main thread; large images can temporarily block interactions.
+- Algorithm comparison caps the rendered preview's longest side at 512 pixels to keep comparisons responsive.
 - WebP is the only export format.
-- Processing runs on the browser's main thread.
 - Large images may take additional processing time.
 - Browser Canvas limits and encoder support vary.
+- Comparison previews are bounded to 512 pixels on their longest edge; exported output retains the configured full dimensions.
 - Batch processing, CLI tools, TypeScript packages, and AI features are not yet available.
 - Offline PWA support is not implemented.
 
