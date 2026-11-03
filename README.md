@@ -30,7 +30,7 @@
 
 **Sidali DitherLab** is a lightweight, privacy-first image-processing application built with vanilla JavaScript, HTML, and CSS. Its reusable engine supports monochrome output and full-color palette dithering without uploading images or palettes.
 
-It provides nine monochrome and full-color dithering algorithms, six monochrome presets and eight color presets, algorithm/palette comparisons, adjustable processing controls, and WebP optimization.
+It provides nine monochrome and full-color dithering algorithms, six monochrome presets and eight color presets, algorithm/palette comparisons, adjustable processing controls, worker-backed previews, batch conversion, and format-aware exports.
 
 Everything runs locally in your browser. Your images are processed on your device without being uploaded to a server.
 
@@ -60,7 +60,17 @@ No installation, account, or image upload to a server required.
 |---|---|
 | ![Palette comparison workspace](./assets/screenshots/palette-comparison.png) | ![Color Palette Studio on mobile](./assets/screenshots/mobile-color-studio.png) |
 
-> The screenshots were captured from the actual running application using original sample artwork included in this repository.
+| Worker Processing | Advanced Export |
+|---|---|
+| ![Worker-backed processing in the editor](./assets/screenshots/worker-processing.png) | ![Advanced format-aware export](./assets/screenshots/advanced-export.png) |
+
+| Batch Workspace | Batch Processing |
+|---|---|
+| ![Queued batch conversion](./assets/screenshots/batch-workspace.png) | ![Batch conversion in progress](./assets/screenshots/batch-processing.png) |
+
+![Responsive mobile editor with export and processing controls](./assets/screenshots/mobile-editor.png)
+
+> Screenshots show the actual application and repository sample artwork. The batch screenshots show queued and actively processing states, not a completed archive.
 
 ## ⚡ Features
 
@@ -71,7 +81,7 @@ No installation, account, or image upload to a server required.
 - **Algorithm-specific controls:** Error-diffusion strength and optional serpentine scan; Bayer 2×2, 4×4, and 8×8 matrices and ordered strength; seeded random value and randomness strength.
 - **Built-in presets:** Classic Mono, Retro Macintosh, Newspaper Texture, Soft Diffusion, Sharp Pixel Mono, and Experimental Noise.
 - **Algorithm comparison:** Render two algorithms from the same original image at a bounded preview resolution and apply either result to the editor.
-- **Processing metrics:** Actual algorithm time, separate WebP encoding duration, output dimensions, and encoded file size.
+- **Processing metrics:** Worker algorithm time, decode duration, resize/preparation duration, preview and full-resolution dimensions, input bytes, encoding duration, total export time, measured encoded size, and comparison against a same-dimension encoded source.
 - **Color metrics:** Current mode, palette and color count, matching metric, and the measured duration of the most recent extraction.
 - **Adjustable output dimensions:** Resize images while preserving their aspect ratio.
 - **Pixel-size control:** Create fine-grained dithering or bold pixelated styles.
@@ -88,6 +98,11 @@ No installation, account, or image upload to a server required.
 - **Alpha handling:** Preserve source alpha, composite onto a chosen background, or emit opaque palette-mapped pixels. Fully transparent pixels are excluded from preserved-mode diffusion.
 - **Color presets:** Game Boy Classic, Retro CGA, 1-Bit Newspaper, PICO-8 Pixel Art, Warm Duotone, Sunset Dither, Adaptive 8-Color, and High-Contrast Poster.
 - **Palette comparison:** Compare algorithm and palette combinations from the same original; choose the same algorithm with two palettes or different algorithms with a shared palette.
+- **Worker-backed processing:** Interactive previews, algorithm comparisons, and explicit palette extraction use native module workers when available. Jobs use transferable pixel buffers, bounded priority scheduling, and stale-preview cancellation; a main-thread engine fallback remains available.
+- **Resolution-aware previews:** Previews are capped at 1024 pixels on the longest side and reuse the decoded source. Exports reprocess original pixels at the configured output dimensions instead of enlarging the preview.
+- **Batch conversion:** Queue up to 100 images and 200 MiB of source files, choose a shared processing preset and output format, pause/resume scheduling, cancel or retry items, and download completed results individually or as a ZIP. Batch output retention is capped at 256 MiB.
+- **Advanced export:** Export PNG, JPEG, or WebP; AVIF is enabled only when the browser's Canvas encoder returns a verified AVIF blob. JPEG transparency is composited on the selected background. Lossy quality controls are hidden for PNG.
+- **Target-size search:** For adjustable-quality formats, measure up to eight actual encodes and select the closest tested result. This bounded search does not guarantee a target; PNG does not support quality-based size search.
 
 ### 🖥️ Professional Editor
 
@@ -103,10 +118,12 @@ No installation, account, or image upload to a server required.
 
 ### 📦 Image Optimization
 
-- WebP image export.
-- Adjustable WebP quality.
+- PNG, JPEG, and WebP export, plus AVIF only when runtime encoding is verified.
+- Adjustable quality for supported lossy formats; JPEG uses a selectable compositing background.
+- Optional bounded target-size quality search for lossy formats.
 - Actual encoded file-size reporting.
 - Output dimension information.
+- Batch export with individual downloads and a standards-compliant ZIP archive.
 - Browser-based image processing.
 - No third-party runtime dependencies.
 
@@ -118,7 +135,7 @@ No installation, account, or image upload to a server required.
 - No mandatory cloud services.
 - Image processing happens in the browser.
 
-**Input limits:** 40 MiB per file and 50 megapixels.
+**Input limits:** 40 MiB per image file and 50 megapixels. Full-resolution export output is limited to 20 megapixels for browser memory safety.
 
 ## 🚀 Getting Started
 
@@ -144,7 +161,7 @@ Navigate into the project:
 cd js-image-dithering-converter-and-compression
 ```
 
-Start a local development server:
+Start a local development server (Python 3 is sufficient):
 
 ```bash
 python3 -m http.server 8000
@@ -252,26 +269,48 @@ sidali-ditherlab/
 │       ├── gameboy-palette.png
 │       ├── custom-palette.png
 │       ├── palette-comparison.png
-│       └── mobile-color-studio.png
+│       ├── mobile-color-studio.png
+│       ├── worker-processing.png
+│       ├── advanced-export.png
+│       ├── batch-workspace.png
+│       └── batch-processing.png
 ├── tests/
 │   ├── fixtures/algorithm-images.mjs
 │   ├── core.test.mjs
 │   ├── engine.test.mjs
-│   └── color.test.mjs
+│   ├── color.test.mjs
+│   └── phase-e.test.mjs
 ├── benchmarks/
 │   ├── algorithms.mjs
-│   └── color-processing.mjs
+│   ├── color-processing.mjs
+│   ├── worker-performance.mjs
+│   └── worker-task.mjs
 ├── src/
-│   └── engine/
-│       ├── algorithms/
-│       ├── color/
-│       ├── palettes/
-│       ├── utilities/
-│       ├── history.mjs
-│       ├── index.mjs
-│       ├── presets.mjs
-│       ├── registry.mjs
-│       └── validation.mjs
+│   ├── engine/
+│   │   ├── algorithms/
+│   │   ├── color/
+│   │   ├── palettes/
+│   │   ├── utilities/
+│   │   ├── history.mjs
+│   │   ├── index.mjs
+│   │   ├── presets.mjs
+│   │   ├── registry.mjs
+│   │   └── validation.mjs
+│   ├── workers/
+│   │   ├── image-worker.mjs
+│   │   ├── job-scheduler.mjs
+│   │   ├── worker-client.mjs
+│   │   └── worker-protocol.mjs
+│   ├── export/
+│   │   ├── filename.mjs
+│   │   ├── formats.mjs
+│   │   └── target-size.mjs
+│   ├── batch/
+│   │   ├── batch-queue.mjs
+│   │   └── zip-writer.mjs
+│   └── utilities/
+│       ├── performance-metrics.mjs
+│       └── resource-manager.mjs
 ├── index.html
 ├── main.js
 ├── core.mjs
@@ -283,7 +322,7 @@ sidali-ditherlab/
 
 ## 🧪 Development and Testing
 
-The application uses native JavaScript modules and Node.js's built-in testing tools.
+The application uses native JavaScript modules and Node.js's built-in testing tools. No dependency installation is required.
 
 Run the test suite:
 
@@ -315,11 +354,18 @@ npm run benchmark:color
 
 This reports median timings for RGB, linear RGB, and Lab image quantization; color Floyd–Steinberg, Atkinson, and Bayer; and sample-bounded Median Cut and K-Means. Extraction uses at most 50,000 sampled visible pixels. Timings are local observations, not performance guarantees.
 
+Compare direct engine calls with transferable-buffer Node worker-thread runs:
+
+```bash
+npm run benchmark:workers
+```
+
+The worker benchmark reports median direct processing, worker compute, worker end-to-end latency, repeated-job throughput, and busy-worker cancellation-to-termination response at 256², 512², 1024², and 2048² by default. Set `DITHERLAB_BENCH_MAX_SIZE=1024` to cap the largest workload or `DITHERLAB_BENCH_ITERATIONS` to change the measured repeat count. Node worker-thread numbers are an instrumentation comparison, not browser measurements or a promise that workers reduce single-job latency.
+
 ## 🗺️ Roadmap
 
-These are planned future phases, not features currently available in the application:
+Phase E's core performance and export features are implemented: worker-backed previews, resolution-bounded previews, full-resolution format-aware export, measured target-size search, a bounded batch queue, and ZIP download. The following phases remain future work:
 
-- **Phase E — Performance:** Web Workers, batch processing, and advanced export.
 - **Phase F — Developer toolkit:** TypeScript SDK, NPM library, CLI, and monorepo.
 - **Phase G — DitherLab experiment workspace:** A dedicated space for future image-processing experiments.
 - **Phase H — Sidali AutoLab:** Local-first intelligent optimization agents for exploring image-processing settings.
@@ -327,14 +373,18 @@ These are planned future phases, not features currently available in the applica
 
 ## ⚠️ Current Limitations
 
-- Processing runs on the browser's main thread; large images can temporarily block interactions.
+- If module workers cannot be created or fail at startup, the existing engine falls back to the main thread; heavy work can then temporarily block the interface. Some setup, Canvas resizing/encoding, and the Adaptive 8-Color preset's small extraction still run on the main thread.
 - Full-color image processing is CPU-intensive, especially with larger palettes and Lab matching; benchmark figures are machine-dependent.
 - Color calculations assume sRGB channel values and do not preserve embedded ICC profiles or guarantee color-managed output across browsers.
 - WebP encoding uses the browser-specific Canvas encoder; supported output and encoding behavior may vary between browsers. Configured WebP quality is lossy, so decoded exports can differ slightly from exact palette RGB values even though the processing buffer and preview use only selected palette entries.
 - Algorithm comparison caps the rendered preview's longest side at 512 pixels to keep comparisons responsive.
-- WebP is the only export format.
-- Browser Canvas dimensions, memory limits, and encoder support vary.
-- Batch processing, Web Workers, a CLI, TypeScript packages, and AI optimization agents are not yet available; see the future roadmap.
+- Canvas PNG/JPEG/WebP encoding and AVIF support vary by browser. AVIF remains disabled unless an actual test encode returns `image/avif`.
+- Target-size search performs at most eight sequential encodes; output sizes can be non-monotonic with quality, and a requested limit may not be met.
+- Batch work is limited to 100 images, 200 MiB of total input, 20 megapixels per output, and 256 MiB of retained output. ZIP output uses uncompressed stored entries, is limited to 256 MiB and classic ZIP bounds, and temporarily allocates archive memory.
+- PNG export is lossless but exposes no browser-controlled compression-quality setting. JPEG is opaque after background compositing; WebP may be lossy.
+- The interactive preview is capped at 1024 pixels on its longest side; export independently processes the full selected dimensions.
+- Browser Canvas dimensions, memory limits, worker support, and encoder behavior vary.
+- A CLI, TypeScript packages, and AI optimization agents are not yet available; see the future roadmap.
 - Offline PWA support is not implemented.
 
 ## 🤝 Contributing

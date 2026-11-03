@@ -35,7 +35,8 @@
         <span class="toolbar-divider" aria-hidden="true"></span>
         <button class="icon-button theme-button" id="theme" type="button" aria-label="Switch to light theme" title="Switch theme">◐</button>
         <a class="icon-button github-link" aria-label="View GitHub repository" title="View GitHub repository" href="https://github.com/sidalikharef/js-image-dithering-converter-and-compression" target="_blank" rel="noreferrer">↗</a>
-        <button class="export-button" id="download" type="button" disabled><span aria-hidden="true">↓</span> Export WebP</button>
+        <button class="text-button" id="openBatch" type="button">Batch</button>
+        <button class="export-button" id="download" type="button" disabled><span aria-hidden="true">↓</span> Export image</button>
       </div>
     </header>
 
@@ -253,6 +254,7 @@
               </div>
               <div class="palette-actions">
                 <button class="text-button" id="extractPalette" type="button">Extract palette</button>
+                <button class="text-button" id="cancelExtraction" type="button" hidden>Cancel extraction</button>
                 <span id="extractionTime">—</span>
               </div>
             </details>
@@ -286,16 +288,48 @@
         </section>
         <section class="tool-section export-settings">
           <h2>Export</h2>
-          <div class="format-row"><span>Format</span><strong><i></i> WebP</strong></div>
           <div class="control">
+            <label for="exportFormat">Format</label>
+            <select id="exportFormat" aria-label="Choose export format">
+              <option value="png">PNG · Lossless</option>
+              <option value="jpeg">JPEG</option>
+              <option value="webp" selected>WebP</option>
+              <option value="avif" disabled>AVIF · Checking support…</option>
+            </select>
+            <small id="formatNotice">Output dimensions preserve source aspect ratio.</small>
+          </div>
+          <div class="control" id="qualityControl">
             <label for="quality">Quality <output id="qualityValue">75%</output></label>
             <input id="quality" type="range" min="0.1" max="1" step="0.05" value="0.75" />
-            <small>Adjusts encoding quality, not resolution.</small>
+            <small id="qualityHelp">Adjusts lossy encoder quality, not resolution.</small>
           </div>
-          <div class="export-stats"><span>File size</span><strong id="filesize">—</strong></div>
-          <div class="export-stats"><span>30 KiB target</span><strong id="target">—</strong></div>
+          <div class="control" id="jpegBackgroundControl" hidden>
+            <label for="jpegBackground">JPEG background</label>
+            <input id="jpegBackground" type="color" value="#FFFFFF" />
+          </div>
+          <div class="control">
+            <label><input id="targetSizeEnabled" type="checkbox" /> Aim for target file size</label>
+            <div class="target-size-inputs">
+              <input id="targetSize" type="number" min="1" step="1" value="100" aria-label="Target file size" disabled />
+              <select id="targetSizeUnit" aria-label="Target size unit" disabled><option>KiB</option><option>MiB</option></select>
+            </div>
+            <small id="targetSizeHelp">Bounded quality search; the closest measured result is used.</small>
+          </div>
+          <div class="export-stats"><span>Preview output size</span><strong id="filesize">—</strong></div>
+          <div class="export-stats"><span>Size vs resized original</span><strong id="exportReduction">—</strong></div>
+          <div class="export-stats"><span>Export dimensions</span><strong id="exportDimensions">—</strong></div>
+          <div class="export-stats"><span>Input dimensions / size</span><strong id="inputMetrics">—</strong></div>
+          <div class="export-stats"><span>Execution</span><strong id="executionMode">—</strong></div>
+          <div class="export-stats"><span>Image decode</span><strong id="decodeTime">—</strong></div>
+          <div class="export-stats"><span>Resize / preparation</span><strong id="resizeTime">—</strong></div>
+          <div class="export-stats"><span>Current export</span><strong id="exportStatus" role="status" aria-live="polite">Ready</strong></div>
+          <progress id="exportProgress" max="1" value="0" hidden aria-label="Export progress"></progress>
+          <button class="text-button" id="cancelExport" type="button" hidden>Cancel export</button>
+          <div class="export-stats"><span>Last encoded size</span><strong id="encodedFileSize">—</strong></div>
+          <div class="export-stats"><span>Target result</span><strong id="target">—</strong></div>
           <div class="export-stats"><span>Processing</span><strong id="processingTime">—</strong></div>
           <div class="export-stats"><span>Encoding</span><strong id="encodingTime">—</strong></div>
+          <div class="export-stats"><span>Total export</span><strong id="exportTotalTime">—</strong></div>
           <div class="export-stats"><span>Algorithm</span><strong id="metricAlgorithm">—</strong></div>
           <div class="export-stats"><span>Preset</span><strong id="metricPreset">Custom</strong></div>
           <div class="export-stats"><span>Mode / palette</span><strong id="metricMode">Monochrome</strong></div>
@@ -330,6 +364,27 @@
           <canvas id="compareCanvasB" aria-label="Algorithm B output"></canvas>
         </article>
       </div>
+    </dialog>
+    <dialog id="batchDialog" class="algorithm-compare-dialog batch-dialog" aria-labelledby="batchTitle">
+      <div class="compare-dialog-header">
+        <div><span class="eyebrow">LOCAL QUEUE · MAX 100 IMAGES</span><h2 id="batchTitle">Batch conversion</h2></div>
+        <button class="icon-button" id="batchClose" type="button" aria-label="Close batch workspace">×</button>
+      </div>
+      <div class="batch-toolbar">
+        <label class="batch-add-button" for="batchFiles">Add images</label>
+        <input id="batchFiles" type="file" accept="image/*" multiple hidden />
+        <label for="batchPreset">Shared preset<select id="batchPreset"><option value="">Use current settings</option></select></label>
+        <label for="batchFormat">Export format<select id="batchFormat"><option value="png">PNG</option><option value="jpeg">JPEG</option><option value="webp" selected>WebP</option><option value="avif" disabled>AVIF</option></select></label>
+        <label for="batchQuality">Lossy quality<input id="batchQuality" type="range" min="0.1" max="1" step="0.05" value="0.75" /></label>
+        <button class="export-button" id="batchStart" type="button">Start queue</button>
+        <button class="text-button" id="batchPause" type="button">Pause</button>
+        <button class="text-button" id="batchResume" type="button">Resume</button>
+        <button class="text-button" id="batchCancel" type="button">Cancel batch</button>
+        <button class="text-button" id="batchDownloadZip" type="button" disabled>Download ZIP</button>
+      </div>
+      <div class="batch-summary" id="batchSummary" aria-live="polite">No images queued.</div>
+      <p class="compare-dialog-status" id="batchStatus" role="status" aria-live="polite">Add up to 100 images. Files are processed locally.</p>
+      <div class="batch-list" id="batchList"></div>
     </dialog>
   </div>
 </body>

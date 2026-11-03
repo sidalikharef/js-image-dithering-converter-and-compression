@@ -7,9 +7,18 @@ import {
   updateCustomPalette, loadPalettes, savePalettes, parsePaletteJSON, serializePaletteJSON,
   extractPalette, COLOR_PRESETS, getColorPreset, validatePaletteColors, hexToRGB, rgbToHex
 } from './src/engine/index.mjs';
+import {createImageProcessor} from './src/workers/worker-client.mjs';
+import {JobScheduler} from './src/workers/job-scheduler.mjs';
+import {encodeCanvas, detectExportCapabilities, EXPORT_FORMATS} from './src/export/formats.mjs';
+import {findClosestTargetSize, parseTargetBytes} from './src/export/target-size.mjs';
+import {safeOutputFilename} from './src/export/filename.mjs';
+import {BatchQueue} from './src/batch/batch-queue.mjs';
+import {createStoredZip} from './src/batch/zip-writer.mjs';
+import {ResourceManager} from './src/utilities/resource-manager.mjs';
 
 const $ = id => document.getElementById(id);
 const controls = ['width', 'grain', 'threshold', 'contrast', 'strength', 'quality', 'algorithm', 'matrixSize', 'orderedStrength', 'seed', 'randomness', 'serpentine', 'preset', 'mode', 'paletteId', 'distanceMethod', 'alphaMode', 'background', 'brightness', 'colorContrast', 'saturation', 'gamma', 'exposure', 'hue', 'temperature', 'tint'];
+const MAX_OUTPUT_PIXELS=20_000_000;
 const defaults = {width:1200, grain:4, threshold:128, contrast:1, strength:1, quality:.75, algorithm:'floyd-steinberg', matrixSize:4, orderedStrength:1, seed:1, randomness:1, serpentine:false, preset:'', mode:'monochrome', paletteId:'black-white', distanceMethod:'rgb', alphaMode:'preserve', background:'#FFFFFF', brightness:0, colorContrast:1, saturation:1, gamma:1, exposure:0, hue:0, temperature:0, tint:0};
 const history = createHistory(defaults);
 let activePalette = getPalette('black-white');
@@ -27,7 +36,24 @@ let zoom = 1;
 let fitZoom = true;
 let processingDuration = 0;
 let encodingDuration = 0;
+let decodeDuration = 0;
 let comparisonSerial = 0;
+const resources = new ResourceManager();
+let executionMode = '—';
+let activePreviewJob = null;
+let activeComparisonJobs = [];
+let activeExportController = null;
+let activeExtractionJob=null;
+let exportCapabilities = null;
+const processor = createImageProcessor({onExecutionMode:mode=>{
+  executionMode=mode==='worker'?'Web Worker':'Main-thread fallback';
+  if($('executionMode'))$('executionMode').textContent=executionMode;
+}});
+const jobScheduler = new JobScheduler({concurrency:2});
+let batchQueue = null;
+const batchObjectUrls = new Map();
+let batchRetainedOutputBytes=0;
+const batchOutputReservations=new Map();
 
 function getSettings() {
   const settings = Object.fromEntries(controls.map(id => {
@@ -385,6 +411,8 @@ function populateComparisonSelectors() {
 }
 
 async function renderAlgorithmComparison() {
+  for(const job of activeComparisonJobs)job.cancel('Comparison superseded.');
+  activeComparisonJobs=[];
   if (!source) {
     $('compareStatus').textContent = 'Import an image before comparing algorithms.';
     return;
@@ -431,20 +459,25 @@ async function renderAlgorithmComparison() {
         temperature:settings.temperature,tint:settings.tint
       }
     };
-    const renderCandidate=(algorithm,palette)=>{
+    const renderCandidate=async(algorithm,palette)=>{
       const key=JSON.stringify([sourceRevision,logical.width,logical.height,algorithm,settings.mode,settings.mode==='color'?palette.colors:null,colorSettings]);
       if(comparisonCache.has(key))return comparisonCache.get(key);
-      const start=performance.now();
-      const result=settings.mode==='color'
-        ? processColorImage(pixels,{...colorSettings,algorithm,palette:palette.colors})
-        : processImage(pixels,algorithm,resolveAlgorithmSettings(settings));
-      const measured={output:result,durationMs:performance.now()-start};
+      const options=settings.mode==='color'
+        ? {...colorSettings,algorithm,palette:palette.colors}
+        : resolveAlgorithmSettings(settings);
+      const job=runImageJob('compare-images',pixels,{
+        mode:settings.mode,algorithm,options
+      },{priority:'medium'});
+      activeComparisonJobs.push(job);
+      const result=await job.promise;
+      const measured={output:{width:result.width,height:result.height,data:new Uint8ClampedArray(result.buffer)},durationMs:result.processingMs};
       if(comparisonCache.size>=8)comparisonCache.delete(comparisonCache.keys().next().value);
       comparisonCache.set(key,measured);
       return measured;
     };
-    const outputA = renderCandidate(algorithmA,paletteA);
-    const outputB = renderCandidate(algorithmB,paletteB);
+    const [outputA,outputB] = await Promise.all([
+      renderCandidate(algorithmA,paletteA),renderCandidate(algorithmB,paletteB)
+    ]);
 
     for (const [canvasId, output, algorithmId, palette,labelId,durationMs] of [
       ['compareCanvasA', outputA.output, algorithmA,paletteA, 'compareLabelA',outputA.durationMs],
@@ -477,7 +510,10 @@ async function renderAlgorithmComparison() {
   } catch (error) {
     if (serial === comparisonSerial) $('compareStatus').textContent = error instanceof Error ? error.message : 'Comparison rendering failed.';
   } finally {
-    if (serial === comparisonSerial) $('runAlgorithmCompare').disabled = false;
+    if (serial === comparisonSerial) {
+      activeComparisonJobs=[];
+      $('runAlgorithmCompare').disabled = false;
+    }
   }
 }
 
@@ -496,14 +532,150 @@ function applyComparisonResult(side) {
   $('algorithmCompare').close();
 }
 
-function canvasToWebP(canvas, quality) {
-  return new Promise((resolve,reject)=>{
-    canvas.toBlob(blob => {
-      if (!blob) return reject(new Error('Canvas export failed.'));
-      if (blob.type !== 'image/webp') return reject(new Error(`Browser did not encode WebP (returned ${blob.type || 'unknown'}). Try a browser with WebP canvas encoding support.`));
-      resolve(blob);
-    }, 'image/webp', quality);
-  });
+function updateExportControls() {
+  const format=$('exportFormat').value;
+  const definition=EXPORT_FORMATS[format];
+  $('qualityControl').hidden=!definition?.quality;
+  $('jpegBackgroundControl').hidden=format!=='jpeg';
+  $('qualityHelp').textContent=definition?.quality
+    ? 'Adjusts lossy encoder quality, not resolution.'
+    : 'PNG is lossless; the browser does not expose a PNG compression-quality slider.';
+  const targetEnabled=$('targetSizeEnabled').checked&&!!definition?.quality;
+  $('targetSize').disabled=!targetEnabled;
+  $('targetSizeUnit').disabled=!targetEnabled;
+  $('targetSizeHelp').textContent=definition?.quality
+    ? 'Bounded search measures actual encoder output; the closest tested quality is used.'
+    : 'Target-size quality search is unavailable for lossless PNG.';
+  if(format==='avif'&&!exportCapabilities?.formats.avif)$('exportStatus').textContent='AVIF encoding is not supported by this browser.';
+  if($('batchFormat'))$('batchQuality').disabled=!EXPORT_FORMATS[$('batchFormat').value]?.quality;
+  $('formatNotice').textContent=format==='jpeg'
+    ?'JPEG does not support transparency; transparent areas are composited onto the selected background.'
+    :'Output dimensions preserve source aspect ratio.';
+  if($('batchQuality'))$('batchQuality').closest('label').hidden=!EXPORT_FORMATS[$('batchFormat').value]?.quality;
+}
+
+function downloadBlob(blob, filename) {
+  const url=resources.createObjectURL(blob);
+  const link=document.createElement('a');
+  link.href=url;link.download=filename;
+  document.body.append(link);link.click();link.remove();
+  setTimeout(()=>resources.revokeObjectURL(url),30_000);
+}
+
+async function exportCurrentImage() {
+  if(!source||activeExportController)return;
+  const controller=new AbortController();
+  activeExportController=controller;
+  const settings=getSettings();
+  const format=$('exportFormat').value;
+  const quality=Number($('quality').value);
+  const totalStart=performance.now();
+  let processMs=0;
+  let resizeMs=0;
+  $('download').disabled=true;
+  $('cancelExport').hidden=false;
+  $('exportProgress').hidden=false;
+  $('exportProgress').removeAttribute('value');
+  $('target').textContent='—';
+  $('exportStatus').textContent='Preparing full-resolution export…';
+  $('status').textContent='Processing full-resolution export…';
+  try {
+    if(format==='avif'&&!exportCapabilities?.formats.avif) {
+      throw Object.assign(new Error('AVIF encoding is not supported by this browser. Choose PNG, JPEG, or WebP.'),{code:'UNSUPPORTED_ENCODER'});
+    }
+    const dimensions=outputDimensions(source.width,source.height,settings.width);
+    if(dimensions.width>32_767||dimensions.height>32_767||dimensions.width*dimensions.height>MAX_OUTPUT_PIXELS) {
+      throw new Error('Export exceeds the 20-megapixel memory-safe output limit. Reduce the output width.');
+    }
+    const logical=processingDimensions(dimensions.width,dimensions.height,settings.grain);
+    const sample=document.createElement('canvas');
+    sample.width=logical.width;sample.height=logical.height;
+    const sampleContext=sample.getContext('2d',{willReadFrequently:true});
+    if(!sampleContext)throw new Error('Could not allocate the full-resolution processing buffer.');
+    const resizeStarted=performance.now();
+    sampleContext.drawImage(source,0,0,logical.width,logical.height);
+    const pixels=sampleContext.getImageData(0,0,logical.width,logical.height);
+    resizeMs=performance.now()-resizeStarted;
+    $('exportStatus').textContent='Processing original image at export resolution…';
+    const processStart=performance.now();
+    const job=runImageJob('process-image',pixels,{
+      mode:settings.mode,algorithm:settings.algorithm,
+      options:settings.mode==='color'?colorProcessingSettings(settings,settings.paletteColors):resolveAlgorithmSettings(settings)
+    },{priority:'medium',signal:controller.signal});
+    activeExportController.cancelProcessing=job.cancel;
+    const result=await job.promise;
+    processMs=result.processingMs??(performance.now()-processStart);
+    if(controller.signal.aborted)throw new DOMException('Export cancelled.','AbortError');
+
+    const low=document.createElement('canvas');
+    low.width=logical.width;low.height=logical.height;
+    const lowContext=low.getContext('2d');
+    if(!lowContext)throw new Error('Could not initialize the export processing canvas.');
+    lowContext.putImageData(new ImageData(new Uint8ClampedArray(result.buffer),logical.width,logical.height),0,0);
+    const output=document.createElement('canvas');
+    output.width=dimensions.width;output.height=dimensions.height;
+    const outputContext=output.getContext('2d');
+    if(!outputContext)throw new Error('Could not allocate the output canvas.');
+    outputContext.imageSmoothingEnabled=false;
+    outputContext.drawImage(low,0,0,dimensions.width,dimensions.height);
+
+    $('exportStatus').textContent='Encoding output…';
+    const encodingStart=performance.now();
+    let blob,selectedQuality=quality,targetResult=null;
+    const encodeAtQuality=value=>encodeCanvas(output,format,value,{background:$('jpegBackground').value});
+    if($('targetSizeEnabled').checked&&EXPORT_FORMATS[format].quality) {
+      const targetBytes=parseTargetBytes($('targetSize').value,$('targetSizeUnit').value);
+      targetResult=await findClosestTargetSize(encodeAtQuality,{targetBytes,minQuality:.1,maxQuality:1,attempts:8,signal:controller.signal});
+      blob=targetResult.blob;selectedQuality=targetResult.quality;
+      $('target').textContent=targetResult.compliant
+        ? `Within target at ${Math.round(selectedQuality*100)}%`
+        : `Closest result exceeds target (${formatBytes(blob.size)})`;
+      $('target').className=targetResult.compliant?'target-good':'';
+    } else {
+      if($('targetSizeEnabled').checked) {
+        $('target').textContent='PNG is lossless; target quality search unavailable.';
+      }
+      blob=await encodeAtQuality(quality);
+    }
+    if(controller.signal.aborted)throw new DOMException('Export cancelled.','AbortError');
+    const baseline=document.createElement('canvas');
+    baseline.width=dimensions.width;baseline.height=dimensions.height;
+    const baselineContext=baseline.getContext('2d');
+    if(!baselineContext)throw new Error('Could not allocate the comparison-size canvas.');
+    baselineContext.drawImage(source,0,0,dimensions.width,dimensions.height);
+    const baselineBlob=await encodeCanvas(baseline,format,selectedQuality,{background:$('jpegBackground').value});
+    const reduction=baselineBlob.size
+      ?((baselineBlob.size-blob.size)/baselineBlob.size)*100
+      :null;
+    encodingDuration=performance.now()-encodingStart;
+    latestBlob=blob;
+    $('filesize').textContent=formatBytes(blob.size);
+    $('encodedFileSize').textContent=formatBytes(blob.size);
+    $('exportReduction').textContent=reduction===null?'—':`${reduction.toFixed(1)}% ${reduction>=0?'smaller':'larger'}`;
+    $('processingTime').textContent=`${processMs.toFixed(2)} ms`;
+    $('encodingTime').textContent=`${encodingDuration.toFixed(2)} ms`;
+    $('resizeTime').textContent=`${resizeMs.toFixed(2)} ms`;
+    $('decodeTime').textContent=`${decodeDuration.toFixed(2)} ms`;
+    $('exportDimensions').textContent=`${dimensions.width} × ${dimensions.height}`;
+    $('exportStatus').textContent=`Exported ${formatBytes(blob.size)} ${format.toUpperCase()} in ${(performance.now()-totalStart).toFixed(2)} ms`;
+    $('exportTotalTime').textContent=`${(performance.now()-totalStart).toFixed(2)} ms`;
+    $('target').textContent=targetResult
+      ? `${targetResult.compliant?'Within target':'Closest measured'} · ${formatBytes(blob.size)}`
+      : $('target').textContent==='—'?'—':$('target').textContent;
+    downloadBlob(blob,safeOutputFilename(`${sourceName.replace(/\.[^.]+$/,'')}-dithered`,format));
+    $('status').textContent=`Export complete · ${formatBytes(blob.size)} ${format.toUpperCase()}`;
+    $('statusDot').className='ready';
+  } catch(error) {
+    const cancelled=error?.name==='AbortError'||controller.signal.aborted;
+    $('exportStatus').textContent=cancelled?'Export cancelled':error.message||'Export failed.';
+    $('status').textContent=cancelled?'Export cancelled':error.message||'Export failed.';
+    $('statusDot').className=cancelled?'':'error';
+  } finally {
+    if(activeExportController===controller)activeExportController=null;
+    $('download').disabled=!source;
+    $('cancelExport').hidden=true;
+    $('exportProgress').hidden=true;
+  }
 }
 
 async function loadImage(file) {
@@ -562,9 +734,9 @@ function updateComparison() {
   $('compareValue').textContent = `${value}%`;
 }
 
-function colorProcessingSettings(settings) {
+function colorProcessingSettings(settings, palette=activePalette.colors) {
   return {
-    palette:activePalette.colors,
+    palette,
     method:settings.distanceMethod,
     algorithm:settings.algorithm,
     alphaMode:settings.alphaMode,
@@ -583,10 +755,41 @@ function colorProcessingSettings(settings) {
   };
 }
 
+let processingJobSequence = 0;
+function runImageJob(type, image, payload, {priority='high',signal}={}) {
+  const id=`${type.replace(/[^a-z]/g,'')}-${++processingJobSequence}`;
+  const buffer=image.data.slice().buffer;
+  let task;
+  const scheduled=jobScheduler.submit({
+    id,priority,signal,
+    run:({signal:jobSignal})=>new Promise((resolve,reject)=>{
+      task=processor.submit(type,{...payload,width:image.width,height:image.height,buffer},{id});
+      const cancel=()=>{task?.cancel(jobSignal.reason);reject(new DOMException('Processing cancelled.','AbortError'));};
+      if(jobSignal.aborted){cancel();return;}
+      jobSignal.addEventListener('abort',cancel,{once:true});
+      task.promise.then(value=>{
+        jobSignal.removeEventListener('abort',cancel);
+        resolve(value);
+      },error=>{
+        jobSignal.removeEventListener('abort',cancel);
+        reject(error);
+      });
+    })
+  });
+  const promise=scheduled.promise.then(result=>{
+    if(result.state==='completed')return result.value;
+    if(result.state==='failed')throw result.error;
+    throw new DOMException('Processing cancelled.','AbortError');
+  });
+  return {promise,cancel:scheduled.cancel};
+}
+
 async function render() {
   const serial = ++renderSerial;
+  activePreviewJob?.cancel('Superseded by a newer preview.');
+  activePreviewJob=null;
   latestBlob = null;
-  $('download').disabled = true;
+  $('download').disabled = !source;
   if (!source) return;
   const settings = getSettings();
   $('processingTime').textContent = '—';
@@ -600,10 +803,16 @@ async function render() {
   $('statusDot').className = 'processing';
   try {
     const dimensions = outputDimensions(source.width, source.height, settings.width);
-    if (dimensions.width > 32_767 || dimensions.height > 32_767 || dimensions.width * dimensions.height > 50_000_000) {
-      throw new Error('Output exceeds the supported canvas size. Reduce the output width or use a less extreme aspect ratio.');
+    if (dimensions.width > 32_767 || dimensions.height > 32_767 || dimensions.width * dimensions.height > MAX_OUTPUT_PIXELS) {
+      throw new Error('Preview output exceeds the 20-megapixel memory-safe limit. Reduce the output width.');
     }
-    const logical = processingDimensions(dimensions.width, dimensions.height, settings.grain);
+    const previewScale=Math.min(1,1024/dimensions.width,1024/dimensions.height);
+    const previewDimensions={
+      width:Math.max(1,Math.round(dimensions.width*previewScale)),
+      height:Math.max(1,Math.round(dimensions.height*previewScale))
+    };
+    const logical = processingDimensions(previewDimensions.width, previewDimensions.height,
+      Math.max(1,Math.round(settings.grain*previewScale)));
     const low = document.createElement('canvas');
     low.width = logical.width;
     low.height = logical.height;
@@ -612,46 +821,58 @@ async function render() {
     lowContext.drawImage(source, 0, 0, logical.width, logical.height);
     const pixels = lowContext.getImageData(0, 0, logical.width, logical.height);
     const processStart = performance.now();
-    const dithered = settings.mode==='color'
-      ? processColorImage(pixels,colorProcessingSettings(settings))
-      : processImage(pixels, settings.algorithm, resolveAlgorithmSettings(settings));
-    processingDuration = performance.now() - processStart;
+    const job=runImageJob('process-image',pixels,{
+      mode:settings.mode,algorithm:settings.algorithm,
+      options:settings.mode==='color'?colorProcessingSettings(settings,settings.paletteColors):resolveAlgorithmSettings(settings)
+    },{priority:'high'});
+    activePreviewJob=job;
+    const result=await job.promise;
+    const dithered={...result,data:new Uint8ClampedArray(result.buffer)};
+    processingDuration = result.processingMs ?? (performance.now() - processStart);
     lowContext.putImageData(new ImageData(dithered.data, logical.width, logical.height), 0, 0);
 
     const originalCanvas = $('originalCanvas');
     const outputCanvas = $('outputCanvas');
-    originalCanvas.width = outputCanvas.width = dimensions.width;
-    originalCanvas.height = outputCanvas.height = dimensions.height;
+    originalCanvas.width = outputCanvas.width = previewDimensions.width;
+    originalCanvas.height = outputCanvas.height = previewDimensions.height;
     const originalContext = originalCanvas.getContext('2d');
     const outputContext = outputCanvas.getContext('2d');
     if (!originalContext || !outputContext) throw new Error('Could not initialize the preview canvas.');
-    originalContext.clearRect(0, 0, dimensions.width, dimensions.height);
-    originalContext.drawImage(source, 0, 0, dimensions.width, dimensions.height);
-    outputContext.clearRect(0, 0, dimensions.width, dimensions.height);
+    originalContext.clearRect(0, 0, previewDimensions.width, previewDimensions.height);
+    originalContext.drawImage(source, 0, 0, previewDimensions.width, previewDimensions.height);
+    outputContext.clearRect(0, 0, previewDimensions.width, previewDimensions.height);
     outputContext.imageSmoothingEnabled = false;
-    outputContext.drawImage(low, 0, 0, dimensions.width, dimensions.height);
+    outputContext.drawImage(low, 0, 0, previewDimensions.width, previewDimensions.height);
 
     const encodingStart = performance.now();
-    const blob = await canvasToWebP(outputCanvas, settings.quality);
+    let blob=null;
+    try {blob=await encodeCanvas(outputCanvas,$('exportFormat').value,Number($('quality').value),{background:$('jpegBackground').value});}
+    catch {blob=null;}
     encodingDuration = performance.now() - encodingStart;
     if (serial !== renderSerial) return;
     latestBlob = blob;
     $('placeholder').hidden = true;
     $('canvasStage').hidden = false;
-    $('dimensions').textContent = `${dimensions.width} × ${dimensions.height}`;
+    $('dimensions').textContent = previewScale<1
+      ? `${dimensions.width} × ${dimensions.height} export · ${previewDimensions.width} × ${previewDimensions.height} preview`
+      : `${dimensions.width} × ${dimensions.height}`;
+    $('exportDimensions').textContent=`${dimensions.width} × ${dimensions.height}`;
+    $('inputMetrics').textContent=`${source.width} × ${source.height} · ${formatBytes(sourceFileSize)}`;
+    $('decodeTime').textContent=`${decodeDuration.toFixed(2)} ms`;
     $('imageInfo').textContent = `${source.width} × ${source.height} px · ${formatBytes(sourceFileSize)}`;
-    $('filesize').textContent = formatBytes(blob.size);
+    $('filesize').textContent = blob?formatBytes(blob.size):'Unavailable';
     $('processingTime').textContent = `${processingDuration.toFixed(2)} ms`;
     $('encodingTime').textContent = `${encodingDuration.toFixed(2)} ms`;
     $('metricAlgorithm').textContent = getAlgorithm(settings.algorithm).name;
     $('metricPreset').textContent = presetName(settings.preset);
-    $('target').textContent = blob.size < 30 * 1024 ? 'Under target' : 'Above target';
-    $('target').className = blob.size < 30 * 1024 ? 'target-good' : '';
+    $('target').textContent = $('targetSizeEnabled').checked?'Not measured':'—';
+    $('target').className = '';
     $('download').disabled = false;
     $('zoomOut').disabled = false;
     $('zoomValue').disabled = false;
     $('zoomIn').disabled = false;
-    $('status').textContent = `Ready · ${formatBytes(blob.size)} WebP`;
+    $('status').textContent = `Preview ready · ${previewDimensions.width} × ${previewDimensions.height}${previewScale<1?' (reduced resolution)':''}`;
+    $('executionMode').textContent=executionMode;
     $('statusDot').className = 'ready';
     updateCanvasZoom();
     setView($('canvasStage').dataset.view || 'processed');
@@ -673,10 +894,14 @@ async function render() {
 
 function scheduleRender() {
   ++renderSerial;
+  activePreviewJob?.cancel('Superseded by a newer preview.');
+  activePreviewJob=null;
   latestBlob = null;
   $('download').disabled = true;
   $('processingTime').textContent = '—';
   $('encodingTime').textContent = '—';
+  $('encodedFileSize').textContent='—';
+  $('exportReduction').textContent='—';
   clearTimeout(debounceTimer);
   debounceTimer = setTimeout(render, 130);
 }
@@ -728,6 +953,8 @@ $('redo').addEventListener('click', () => {
 async function chooseFile(file) {
   if (!file) return;
   ++renderSerial;
+  activePreviewJob?.cancel('Superseded by a new source image.');
+  activePreviewJob=null;
   clearTimeout(debounceTimer);
   latestBlob = null;
   $('download').disabled = true;
@@ -735,7 +962,9 @@ async function chooseFile(file) {
   $('statusDot').className = 'processing';
   const token = renderSerial;
   try {
+    const decodeStarted=performance.now();
     const image = await loadImage(file);
+    decodeDuration=performance.now()-decodeStarted;
     if (token !== renderSerial) {
       if (typeof image.close === 'function') image.close();
       return;
@@ -776,15 +1005,223 @@ for (const name of ['dragleave', 'drop']) $('dropzone').addEventListener(name, e
 });
 $('dropzone').addEventListener('drop', event => chooseFile(event.dataTransfer?.files?.[0]));
 $('download').addEventListener('click', () => {
-  if (!latestBlob) return;
-  const url = URL.createObjectURL(latestBlob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = sourceName.replace(/\.[^.]+$/, '') + '-dithered.webp';
-  document.body.append(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  exportCurrentImage();
+});
+$('cancelExport').addEventListener('click',()=>{
+  if(activeExportController){
+    activeExportController.abort('Cancelled by user.');
+    activeExportController.cancelProcessing?.('Cancelled by user.');
+  }
+});
+$('exportFormat').addEventListener('change',()=>{updateExportControls();scheduleRender();});
+$('jpegBackground').addEventListener('input',scheduleRender);
+$('targetSizeEnabled').addEventListener('change',updateExportControls);
+
+async function initializeExportCapabilities() {
+  try{
+    exportCapabilities=await detectExportCapabilities();
+    const avif=$('exportFormat').querySelector('option[value="avif"]');
+    avif.disabled=!exportCapabilities.formats.avif;
+    avif.textContent=exportCapabilities.formats.avif?'AVIF':'AVIF · Unsupported by this browser';
+    for(const format of ['png','jpeg','webp']) {
+      const option=$('exportFormat').querySelector(`option[value="${format}"]`);
+      option.disabled=!exportCapabilities.formats[format];
+    }
+    const batchAvif=$('batchFormat').querySelector('option[value="avif"]');
+    batchAvif.disabled=!exportCapabilities.formats.avif;
+    batchAvif.textContent=exportCapabilities.formats.avif?'AVIF':'AVIF · Unsupported';
+    if(!exportCapabilities.formats[$('exportFormat').value])$('exportFormat').value='png';
+    updateExportControls();
+  }catch(error){
+    $('exportStatus').textContent=`Export capability detection failed: ${error.message}`;
+  }
+  try{
+    const capabilityJob=processor.submit('get-capabilities',{});
+    const capabilities=await capabilityJob.promise;
+    if(capabilities.moduleWorkers)executionMode='Web Worker';
+    else executionMode='Main-thread fallback';
+    $('executionMode').textContent=executionMode;
+  }catch{
+    executionMode=processor.available?'Worker unavailable':'Main-thread fallback';
+    $('executionMode').textContent=executionMode;
+  }
+}
+
+function batchPresetSettings() {
+  const settings=getSettings();
+  const id=$('batchPreset').value;
+  if(!id)return settings;
+  const monochrome=PRESETS.find(preset=>preset.id===id);
+  if(monochrome)return {...settings,...monochrome.settings,preset:id};
+  const color=getColorPreset(id);
+  if(color){
+    Object.assign(settings,color.settings,{preset:id});
+    const palette=color.settings.paletteId==='adaptive'?null:getPalette(color.settings.paletteId);
+    if(palette)Object.assign(settings,{paletteId:palette.id,paletteName:palette.name,paletteColors:palette.colors.slice()});
+  }
+  return settings;
+}
+
+function renderBatchQueue(items,summary) {
+  const savings=summary.savedBytes>=0
+    ?`saved ${formatBytes(summary.savedBytes)}${summary.savedPercent===null?'':` (${summary.savedPercent.toFixed(1)}%)`}`
+    :`output +${formatBytes(-summary.savedBytes)} (${Math.abs(summary.savedPercent??0).toFixed(1)}% larger)`;
+  $('batchSummary').textContent=items.length
+    ? `${summary.total} total · ${summary.queued} queued · ${summary.running} running · ${summary.completed} completed · ${summary.failed} failed · ${summary.cancelled} cancelled · in ${formatBytes(summary.inputBytes)} · out ${formatBytes(summary.outputBytes)} · ${savings}`
+    : 'No images queued.';
+  if(summary.total>0&&summary.queued===0&&summary.running===0){
+    $('batchStatus').textContent=`Batch finished · ${summary.completed} completed · ${summary.failed} failed · ${summary.cancelled} cancelled.`;
+  }
+  $('batchDownloadZip').disabled=summary.completed===0;
+  const list=$('batchList');
+  list.replaceChildren();
+  for(const item of items){
+    const row=document.createElement('article');row.className='batch-item';
+    const image=document.createElement('img');image.alt='';image.src=batchObjectUrls.get(item.id)??'';
+    const info=document.createElement('div');info.className='batch-item-info';
+    const name=document.createElement('strong');name.textContent=item.name;
+    const dimensions=document.createElement('small');dimensions.textContent=
+      `${item.dimensions?`${item.dimensions.width} × ${item.dimensions.height} px · `:''}${formatBytes(item.size)} · ${item.settings.format.toUpperCase()} · ${item.status}${item.output?` · ${formatBytes(item.output.blob.size)} · ${item.output.durationMs.toFixed(2)} ms`:''}`;
+    if(item.error)dimensions.title=item.error.message;
+    info.append(name,dimensions);
+    const actions=document.createElement('div');actions.className='batch-item-actions';
+    const state=document.createElement('strong');state.className='batch-state';state.dataset.state=item.status;
+    state.textContent=item.status==='running'
+      ?`${item.progress?.stage==='encoding'?'Encoding':'Processing'}…`
+      :item.status;
+    actions.append(state);
+    if(item.output){
+      const download=document.createElement('button');download.type='button';download.className='text-button';
+      download.textContent='Download';download.addEventListener('click',()=>downloadBlob(item.output.blob,item.outputName));actions.append(download);
+    }else if(item.status==='failed'){
+      const retry=document.createElement('button');retry.type='button';retry.className='text-button';
+      retry.textContent='Retry';retry.addEventListener('click',()=>batchQueue.retry(item.id));actions.append(retry);
+    }else if(item.status==='queued'||item.status==='running'){
+      const cancel=document.createElement('button');cancel.type='button';cancel.className='text-button';
+      cancel.textContent='Cancel item';cancel.setAttribute('aria-label',`Cancel ${item.name}`);
+      cancel.addEventListener('click',()=>batchQueue.cancel(item.id));actions.append(cancel);
+    }
+    row.append(image,info,actions);list.append(row);
+  }
+}
+
+batchQueue=new BatchQueue({
+  concurrency:2,maxItems:100,
+  processItem:async(item,{signal,onProgress})=>{
+    const started=performance.now();
+    let image;
+    try {
+      image=await loadImage(item.file);
+      if(signal.aborted)throw new DOMException('Batch item cancelled.','AbortError');
+      if(image.width*image.height>50_000_000)throw new Error('Image exceeds the 50-megapixel input limit.');
+      let settings=item.settings;
+      if(settings.paletteId==='adaptive'){
+        const sourceCanvas=document.createElement('canvas');sourceCanvas.width=Math.min(image.width,512);
+        sourceCanvas.height=Math.max(1,Math.round(image.height*sourceCanvas.width/image.width));
+        const sourceContext=sourceCanvas.getContext('2d',{willReadFrequently:true});
+        if(!sourceContext)throw new Error('Could not allocate palette extraction canvas.');
+        sourceContext.drawImage(image,0,0,sourceCanvas.width,sourceCanvas.height);
+        const extracted=await runImageJob('extract-palette',sourceContext.getImageData(0,0,sourceCanvas.width,sourceCanvas.height),
+          {options:{method:'median-cut',colorCount:8}},{priority:'low',signal}).promise;
+        if(extracted.colors.length<2)throw new Error('Image has fewer than two visible colors for adaptive palette extraction.');
+        settings={...settings,paletteColors:extracted.colors};
+      }
+      const dimensions=outputDimensions(image.width,image.height,settings.width);
+      if(dimensions.width*dimensions.height>MAX_OUTPUT_PIXELS)throw new Error('Batch output exceeds the 20-megapixel memory-safe limit.');
+      const logical=processingDimensions(dimensions.width,dimensions.height,settings.grain);
+      const sample=document.createElement('canvas');sample.width=logical.width;sample.height=logical.height;
+      const sampleContext=sample.getContext('2d',{willReadFrequently:true});
+      if(!sampleContext)throw new Error('Could not allocate batch processing canvas.');
+      sampleContext.drawImage(image,0,0,logical.width,logical.height);
+      const pixels=sampleContext.getImageData(0,0,logical.width,logical.height);
+      onProgress({stage:'processing'});
+      const result=await runImageJob('process-image',pixels,{
+        mode:settings.mode,algorithm:settings.algorithm,
+        options:settings.mode==='color'?colorProcessingSettings(settings,settings.paletteColors):resolveAlgorithmSettings(settings)
+      },{priority:'low',signal}).promise;
+      const low=document.createElement('canvas');low.width=logical.width;low.height=logical.height;
+      const lowContext=low.getContext('2d');if(!lowContext)throw new Error('Could not initialize batch output.');
+      lowContext.putImageData(new ImageData(new Uint8ClampedArray(result.buffer),logical.width,logical.height),0,0);
+      const canvas=document.createElement('canvas');canvas.width=dimensions.width;canvas.height=dimensions.height;
+      const outputContext=canvas.getContext('2d');if(!outputContext)throw new Error('Could not allocate batch export canvas.');
+      outputContext.imageSmoothingEnabled=false;outputContext.drawImage(low,0,0,dimensions.width,dimensions.height);
+      onProgress({stage:'encoding'});
+      const encodingStarted=performance.now();
+      const blob=await encodeCanvas(canvas,settings.format,settings.quality,{background:$('jpegBackground').value});
+      if(signal.aborted)throw new DOMException('Batch item cancelled.','AbortError');
+      if(batchRetainedOutputBytes+blob.size>256*1024*1024)throw new Error('Batch output memory limit reached (256 MiB). Download or clear completed results before continuing.');
+      batchRetainedOutputBytes+=blob.size;
+      batchOutputReservations.set(item.id,blob.size);
+      return {blob,width:dimensions.width,height:dimensions.height,
+        durationMs:performance.now()-started,encodingMs:performance.now()-encodingStarted};
+    }finally{image?.close?.();}
+  },
+  onChange:(items,summary)=>{
+    for(const item of items){
+      if((item.status==='failed'||item.status==='cancelled')&&!item.output&&batchOutputReservations.has(item.id)){
+        batchRetainedOutputBytes-=batchOutputReservations.get(item.id);
+        batchOutputReservations.delete(item.id);
+      }
+    }
+    renderBatchQueue(items,summary);
+  }
+});
+batchQueue.pause();
+
+for(const preset of PRESETS)$('batchPreset').add(new Option(preset.name,preset.id));
+const batchColorGroup=document.createElement('optgroup');batchColorGroup.label='Color presets';
+for(const preset of COLOR_PRESETS)batchColorGroup.append(new Option(preset.name,preset.id));
+$('batchPreset').append(batchColorGroup);
+
+function addBatchFiles(files) {
+  const images=[...files].filter(file=>file.type.startsWith('image/')||/\.(png|jpe?g|webp|gif|bmp|avif)$/i.test(file.name));
+  if(!images.length){$('batchStatus').textContent='Choose one or more browser-supported image files.';return;}
+  try{
+    const settings={...batchPresetSettings(),format:$('batchFormat').value,quality:Number($('batchQuality').value)};
+    const items=batchQueue.add(images,settings);
+    for(const item of items){
+      const url=resources.createObjectURL(item.file);batchObjectUrls.set(item.id,url);
+      loadImage(item.file).then(bitmap=>{
+        item.dimensions={width:bitmap.width,height:bitmap.height};bitmap.close?.();
+        renderBatchQueue(batchQueue.items,batchQueue.summary());
+      }).catch(error=>{item.error=error;renderBatchQueue(batchQueue.items,batchQueue.summary());});
+    }
+    $('batchStatus').textContent=`Queued ${items.length} image${items.length===1?'':'s'} for local processing.`;
+  }catch(error){$('batchStatus').textContent=error.message;}
+}
+
+$('openBatch').addEventListener('click',()=>$('batchDialog').showModal());
+$('batchClose').addEventListener('click',()=>$('batchDialog').close());
+$('batchFiles').addEventListener('change',event=>{addBatchFiles(event.target.files??[]);event.target.value='';});
+$('batchFormat').addEventListener('change',updateExportControls);
+$('batchStart').addEventListener('click',()=>{batchQueue.resume();$('batchStatus').textContent='Queued batch work is running.';});
+$('batchPause').addEventListener('click',()=>{batchQueue.pause();$('batchStatus').textContent='Scheduling paused; active items will finish.';});
+$('batchResume').addEventListener('click',()=>{batchQueue.resume();$('batchStatus').textContent='Batch scheduling resumed.';});
+$('batchCancel').addEventListener('click',()=>{batchQueue.cancel();$('batchStatus').textContent='Batch cancelled; active worker jobs are being stopped.';});
+$('batchDownloadZip').addEventListener('click',async()=>{
+  const results=batchQueue.items.filter(item=>item.status==='completed'&&item.output);
+  if(!results.length)return;
+  $('batchDownloadZip').disabled=true;$('batchStatus').textContent='Creating ZIP archive…';
+  try{
+    const entries=results.map(item=>({name:item.outputName,data:item.output.blob}));
+    const blob=await createStoredZip(entries,{maxBytes:256*1024*1024,onProgress:progress=>{
+      $('batchStatus').textContent=`Creating ZIP archive · ${progress.completed}/${progress.total}`;
+    }});
+    downloadBlob(blob,'sidali-ditherlab-batch.zip');
+    $('batchStatus').textContent=`ZIP ready · ${results.length} completed image${results.length===1?'':'s'} · ${formatBytes(blob.size)}.`;
+  }catch(error){$('batchStatus').textContent=`ZIP export failed: ${error.message}`;}
+  finally{$('batchDownloadZip').disabled=batchQueue.summary().completed===0;}
+});
+$('batchDialog').addEventListener('dragover',event=>event.preventDefault());
+$('batchDialog').addEventListener('drop',event=>{
+  event.preventDefault();
+  if(event.dataTransfer?.files?.length)addBatchFiles(event.dataTransfer.files);
+});
+window.addEventListener('pagehide',()=>{
+  resources.clear();
+  source?.close?.();
+  processor.cancelAll('Page is closing.');
+  jobScheduler.close();
 });
 
 for (const button of document.querySelectorAll('.view-tab')) {
@@ -875,12 +1312,16 @@ $('exportPalette').addEventListener('click',()=>{
     showPaletteMessage('Palette JSON exported.');
   }catch(error){showPaletteMessage(error.message);}
 });
-$('extractPalette').addEventListener('click',()=>{
+$('extractPalette').addEventListener('click',async()=>{
   try {
     if(!source)throw new Error('Import an image before extracting a palette.');
-    const result=extractPalette(readSourcePixels(512),{
-      method:$('extractionMethod').value,colorCount:Number($('colorCount').value),seed:Number($('seed').value)
-    });
+    const job=runImageJob('extract-palette',readSourcePixels(512),{
+      options:{method:$('extractionMethod').value,colorCount:Number($('colorCount').value),seed:Number($('seed').value)}
+    },{priority:'medium'});
+    activeExtractionJob=job;
+    $('extractPalette').disabled=true;
+    $('cancelExtraction').hidden=false;
+    const result=await job.promise;
     extractionDuration=result.durationMs;
     $('extractionTime').textContent=`${result.durationMs.toFixed(2)} ms · ${result.colors.length} colors`;
     if(result.colors.length<2)throw new Error('The image has fewer than two distinct visible colors; it cannot form a dither palette.');
@@ -889,7 +1330,13 @@ $('extractPalette').addEventListener('click',()=>{
     $('mode').value='color';updateLabels();commitSettings();
     showPaletteMessage(`${result.method==='k-means'?'K-Means':'Median Cut'} generated ${result.colors.length} colors in ${result.durationMs.toFixed(2)} ms. Save locally to reuse it.`);
   }catch(error){showPaletteMessage(error.message);}
+  finally{
+    activeExtractionJob=null;
+    $('extractPalette').disabled=false;
+    $('cancelExtraction').hidden=true;
+  }
 });
+$('cancelExtraction').addEventListener('click',()=>activeExtractionJob?.cancel('Palette extraction cancelled.'));
 for(const id of ['comparePaletteA','comparePaletteB'])$(id).addEventListener('change',renderAlgorithmComparison);
 $('zoomIn').addEventListener('click', () => {
   fitZoom = false;
@@ -935,3 +1382,5 @@ populateSelectors();
 populateComparisonSelectors();
 updateLabels();
 updateHistoryButtons();
+updateExportControls();
+initializeExportCapabilities();
