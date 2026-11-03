@@ -16,7 +16,7 @@
   <meta property="og:url" content="https://github.com/sidalikharef/js-image-dithering-converter-and-compression" />
   <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
   <title>Sidali DitherLab</title>
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=phase-d" />
   <script type="module" src="main.js"></script>
 </head>
 <body>
@@ -140,12 +140,12 @@
             <small id="algorithmDescription">Classic balanced error diffusion.</small>
             <small id="algorithmCategory">Error diffusion</small>
           </div>
-          <div class="control">
+          <div class="control" id="thresholdWrap">
             <label for="threshold">Black threshold <output id="thresholdValue">128</output></label>
             <input id="threshold" type="range" min="40" max="220" step="1" value="128" />
             <small>Sets the luminance cutoff for black pixels.</small>
           </div>
-          <div class="control">
+          <div class="control" id="monoContrastWrap">
             <label for="contrast">Contrast <output id="contrastValue">1.0×</output></label>
             <input id="contrast" type="range" min="0.5" max="2" step="0.1" value="1" />
           </div>
@@ -179,6 +179,111 @@
             <input id="serpentine" type="checkbox" aria-label="Enable serpentine scanning" />
           </div>
         </section>
+        <section class="tool-section color-studio" aria-labelledby="colorStudioTitle">
+          <h2 id="colorStudioTitle">Color &amp; Palette</h2>
+          <div class="control">
+            <label for="mode">Processing mode</label>
+            <select id="mode" aria-label="Processing mode">
+              <option value="monochrome" selected>Monochrome</option>
+              <option value="color">Full color</option>
+            </select>
+          </div>
+          <div id="colorSettings" hidden>
+            <div class="control">
+              <label for="paletteCategory">Palette category</label>
+              <select id="paletteCategory" aria-label="Filter palette category"></select>
+            </div>
+            <div class="control">
+              <label for="paletteSearch">Search palettes</label>
+              <input id="paletteSearch" type="search" placeholder="Find a palette…" autocomplete="off" />
+            </div>
+            <div class="control">
+              <label for="paletteId">Palette</label>
+              <select id="paletteId" aria-label="Select a color palette"></select>
+            </div>
+            <div class="palette-meta"><span id="paletteDescription">Choose a palette.</span><strong id="paletteCount">0 colors</strong></div>
+            <div class="palette-swatches" id="paletteSwatches" aria-label="Selected palette colors"></div>
+            <div class="control">
+              <label for="distanceMethod">Palette matching</label>
+              <select id="distanceMethod" aria-label="Color distance method">
+                <option value="rgb">RGB — Fast</option>
+                <option value="linear-rgb">Linear RGB — Light-aware</option>
+                <option value="lab76">Lab ΔE76 — Perceptual</option>
+              </select>
+              <small>Diffusion errors are calculated separately in gamma-encoded RGB.</small>
+            </div>
+            <details class="palette-details">
+              <summary>Custom palette editor</summary>
+              <div class="control">
+                <label for="customPaletteName">Palette name</label>
+                <input id="customPaletteName" type="text" maxlength="64" value="My Palette" />
+              </div>
+              <div class="palette-color-list" id="paletteColorList"></div>
+              <div class="palette-actions">
+                <button class="text-button" id="addPaletteColor" type="button">+ Add color</button>
+                <button class="text-button" id="newPalette" type="button">New</button>
+                <button class="text-button" id="duplicatePalette" type="button">Duplicate</button>
+              </div>
+              <div class="palette-actions">
+                <button class="text-button" id="savePalette" type="button">Save locally</button>
+                <button class="text-button" id="deletePalette" type="button">Delete saved</button>
+                <button class="text-button" id="resetPalette" type="button">Reset edits</button>
+              </div>
+              <div class="palette-actions">
+                <button class="text-button" id="importPalette" type="button">Import JSON</button>
+                <button class="text-button" id="exportPalette" type="button">Export JSON</button>
+                <input id="paletteFile" type="file" accept="application/json,.json" hidden />
+              </div>
+              <p class="palette-message" id="paletteMessage" role="status" aria-live="polite"></p>
+            </details>
+            <details class="palette-details">
+              <summary>Extract from image</summary>
+              <div class="control">
+                <label for="extractionMethod">Extraction method</label>
+                <select id="extractionMethod">
+                  <option value="median-cut">Median Cut</option>
+                  <option value="k-means">K-Means</option>
+                </select>
+              </div>
+              <div class="control">
+                <label for="colorCount">Desired colors</label>
+                <select id="colorCount">
+                  <option>2</option><option>4</option><option selected>8</option><option>16</option><option>32</option>
+                </select>
+              </div>
+              <div class="palette-actions">
+                <button class="text-button" id="extractPalette" type="button">Extract palette</button>
+                <span id="extractionTime">—</span>
+              </div>
+            </details>
+            <details class="palette-details">
+              <summary>Color adjustments</summary>
+              <div class="control"><label for="brightness">Brightness <output id="brightnessValue">0</output></label><input id="brightness" type="range" min="-1" max="1" step=".05" value="0" /></div>
+              <div class="control"><label for="colorContrast">Contrast <output id="colorContrastValue">1.0×</output></label><input id="colorContrast" type="range" min="0" max="3" step=".05" value="1" /></div>
+              <div class="control"><label for="saturation">Saturation <output id="saturationValue">1.0×</output></label><input id="saturation" type="range" min="0" max="3" step=".05" value="1" /></div>
+              <div class="control"><label for="gamma">Gamma <output id="gammaValue">1.00</output></label><input id="gamma" type="range" min=".1" max="3" step=".05" value="1" /></div>
+              <div class="control"><label for="exposure">Exposure <output id="exposureValue">0 EV</output></label><input id="exposure" type="range" min="-4" max="4" step=".1" value="0" /></div>
+              <div class="control"><label for="hue">Hue <output id="hueValue">0°</output></label><input id="hue" type="range" min="-180" max="180" step="1" value="0" /></div>
+              <div class="control"><label for="temperature">Temperature <output id="temperatureValue">0</output></label><input id="temperature" type="range" min="-1" max="1" step=".05" value="0" /></div>
+              <div class="control"><label for="tint">Tint <output id="tintValue">0</output></label><input id="tint" type="range" min="-1" max="1" step=".05" value="0" /></div>
+            </details>
+            <details class="palette-details">
+              <summary>Transparency</summary>
+              <div class="control">
+                <label for="alphaMode">Alpha handling</label>
+                <select id="alphaMode">
+                  <option value="preserve">Preserve transparent pixels</option>
+                  <option value="composite">Composite background</option>
+                  <option value="opaque">Opaque output (composite transparent regions)</option>
+                </select>
+              </div>
+              <div class="control" id="backgroundWrap">
+                <label for="background">Background color</label>
+                <input id="background" type="color" value="#FFFFFF" />
+              </div>
+            </details>
+          </div>
+        </section>
         <section class="tool-section export-settings">
           <h2>Export</h2>
           <div class="format-row"><span>Format</span><strong><i></i> WebP</strong></div>
@@ -193,6 +298,9 @@
           <div class="export-stats"><span>Encoding</span><strong id="encodingTime">—</strong></div>
           <div class="export-stats"><span>Algorithm</span><strong id="metricAlgorithm">—</strong></div>
           <div class="export-stats"><span>Preset</span><strong id="metricPreset">Custom</strong></div>
+          <div class="export-stats"><span>Mode / palette</span><strong id="metricMode">Monochrome</strong></div>
+          <div class="export-stats"><span>Distance / colors</span><strong id="metricColorMethod">—</strong></div>
+          <div class="export-stats"><span>Extraction</span><strong id="metricExtraction">—</strong></div>
         </section>
         <div class="sidebar-bottom properties-bottom">
           <span class="version-label">SIDALI DITHERLAB <span>·</span> BROWSER EDITION</span>
@@ -206,7 +314,9 @@
       </div>
       <div class="compare-selectors">
         <label>Algorithm A<select id="compareAlgorithmA"></select></label>
+        <label>Palette A<select id="comparePaletteA"></select></label>
         <label>Algorithm B<select id="compareAlgorithmB"></select></label>
+        <label>Palette B<select id="comparePaletteB"></select></label>
         <button class="export-button" id="runAlgorithmCompare" type="button">Render comparison</button>
       </div>
       <p class="compare-dialog-status" id="compareStatus" role="status">Import an image to compare algorithms.</p>

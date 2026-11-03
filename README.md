@@ -6,9 +6,9 @@
 
 # Every Pixel, Perfected.
 
-**A modern, open-source image dithering and optimization studio.**
+**A modern, open-source monochrome and full-color image-processing studio.**
 
-Transform images into beautiful monochrome, pixelated artwork with precision controls, real-time comparisons, and privacy-first processing.
+Transform images into monochrome or palette-based pixel artwork with precision controls, custom palettes, real-time comparisons, and privacy-first processing.
 
 [**🚀 Live Demo**](https://ditterlab.sidalikharef.cc) · [**🌐 Portfolio**](https://sidalikharef.cc) · [**💻 GitHub**](https://github.com/sidalikharef)
 
@@ -25,9 +25,9 @@ Transform images into beautiful monochrome, pixelated artwork with precision con
 
 ## ✨ Overview
 
-**Sidali DitherLab** is a lightweight, privacy-first image-processing application built with vanilla JavaScript, HTML, and CSS.
+**Sidali DitherLab** is a lightweight, privacy-first image-processing application built with vanilla JavaScript, HTML, and CSS. Its reusable engine supports monochrome output and full-color palette dithering without uploading images or palettes.
 
-It provides nine monochrome dithering algorithms, six built-in presets, algorithm-to-algorithm and original/output comparisons, adjustable processing controls, and WebP optimization.
+It provides nine monochrome and full-color dithering algorithms, six monochrome presets and eight color presets, algorithm/palette comparisons, adjustable processing controls, and WebP optimization.
 
 Everything runs locally in your browser. Your images are processed on your device without being uploaded to a server.
 
@@ -61,6 +61,26 @@ No installation, account, or image upload to a server required.
 
 ![Sidali DitherLab algorithm comparison](./assets/screenshots/algorithm-comparison.png)
 
+### Color Palette Studio
+
+![Sidali DitherLab color studio](./assets/screenshots/color-studio.png)
+
+### Game Boy Palette
+
+![Sidali DitherLab Game Boy palette](./assets/screenshots/gameboy-palette.png)
+
+### Custom Palette Editor
+
+![Sidali DitherLab custom palette editor](./assets/screenshots/custom-palette.png)
+
+### Palette Comparison
+
+![Sidali DitherLab palette comparison](./assets/screenshots/palette-comparison.png)
+
+### Mobile Color Studio
+
+![Sidali DitherLab mobile color studio](./assets/screenshots/mobile-color-studio.png)
+
 > The screenshots were captured from the actual running application using original sample artwork included in this repository.
 
 ## ⚡ Features
@@ -73,12 +93,22 @@ No installation, account, or image upload to a server required.
 - **Built-in presets:** Classic Mono, Retro Macintosh, Newspaper Texture, Soft Diffusion, Sharp Pixel Mono, and Experimental Noise.
 - **Algorithm comparison:** Render two algorithms from the same original image at a bounded preview resolution and apply either result to the editor.
 - **Processing metrics:** Actual algorithm time, separate WebP encoding duration, output dimensions, and encoded file size.
+- **Color metrics:** Current mode, palette and color count, matching metric, and the measured duration of the most recent extraction.
 - **Adjustable output dimensions:** Resize images while preserving their aspect ratio.
 - **Pixel-size control:** Create fine-grained dithering or bold pixelated styles.
 - **Black threshold:** Control the balance between black and transparent pixels.
 - **Contrast adjustment:** Fine-tune image detail before quantization.
 - **Diffusion strength:** Adjust how quantization error spreads between pixels.
 - **Transparency support:** Generate opaque black pixels on a transparent background.
+- **Full-color mode:** Quantize original image pixels to a selected palette using Floyd–Steinberg, Atkinson, Jarvis–Judice–Ninke, Stucki, Burkes, Sierra, Sierra Lite, Bayer, or seeded random dithering.
+- **Palette library:** Browse 19 built-in palettes in Classic, Retro Computing, Artistic, and Technical categories, including Game Boy Classic, CGA, Commodore 64, PICO-8, RGB332, and Web-safe.
+- **Color matching:** Choose RGB — Fast, Linear RGB — Light-aware, or CIELAB ΔE76 — Perceptual. These are explicit distance measures, not claims of universally optimal perception.
+- **Palette editing:** Create, name, duplicate, reorder, edit HEX or native color values, and add or remove unique colors. Custom palettes support 2–256 colors, JSON import/export, and versioned localStorage persistence.
+- **Palette extraction:** Generate local palettes with deterministic Median Cut or seeded K-Means from a bounded representative sample of up to 50,000 visible pixels.
+- **Color adjustments:** Apply brightness, contrast, saturation, gamma, exposure, hue, temperature, and tint non-destructively to the decoded source before quantization.
+- **Alpha handling:** Preserve source alpha, composite onto a chosen background, or emit opaque palette-mapped pixels. Fully transparent pixels are excluded from preserved-mode diffusion.
+- **Color presets:** Game Boy Classic, Retro CGA, 1-Bit Newspaper, PICO-8 Pixel Art, Warm Duotone, Sunset Dither, Adaptive 8-Color, and High-Contrast Poster.
+- **Palette comparison:** Compare algorithm and palette combinations from the same original; choose the same algorithm with two palettes or different algorithms with a shared palette.
 
 ### 🖥️ Professional Editor
 
@@ -184,11 +214,25 @@ Fully transparent source pixels are composited against white for luminance calcu
 
 The resulting image contains opaque black pixels and fully transparent pixels, without partially transparent dots.
 
+## 🌈 Full-Color Palette Studio
+
+Switch **Processing mode** to **Full color** to use an independent RGB palette pipeline. The selected algorithm maps each adjusted source pixel directly to an exact palette entry; error diffusion operates on floating-point RGB channel errors, while palette matching uses the independently selected RGB, linear-light RGB, or CIELAB ΔE76 metric. RGB Euclidean distance uses gamma-encoded 8-bit channel values; Linear RGB uses normalized linear-light sRGB; Lab distance is Euclidean ΔE76 with sRGB converted to CIELAB using the D65 reference white and 2° standard observer. Thus the selected matching space is never confused with the RGB space used by the diffusion kernels.
+
+Color Bayer adds a repeating, zero-mean spatial RGB offset before palette matching. Strength zero is plain palette quantization. Seeded Random applies deterministic shared-channel noise before matching; zero strength is also plain quantization. The seven error-diffusion algorithms retain their existing kernels and optional serpentine scanning. No CSS filter is used as a processing substitute.
+
+Built-in Commodore 64 colors use the common Pepto RGB palette variant; CGA uses the classic 16-entry RGBI color set assembled across display modes. The Game Boy Classic palette is a DMG-inspired four-tone set. Artistic palette colors are original selections. Palette matching can produce only the palette colors; preserved fully transparent pixels remain transparent. Partial alpha is retained in Preserve mode. Composite mode blends against the selected background in sRGB code values before adjustments; Opaque mode uses that same background for transparent portions and emits opaque pixels. Hidden RGB values in fully transparent pixels are therefore ignored in both modes.
+
+Color adjustments are applied to a fresh sample of the original on every render, in this order: decode sRGB to linear RGB; apply exposure; apply contrast and brightness; adjust saturation; rotate hue; apply temperature and tint offsets; apply gamma; encode back to sRGB; then evaluate the selected palette distance. Brightness and temperature/tint ranges are normalized offsets; exposure uses EV stops; hue is degrees; gamma is a positive exponent control. Adjustments never modify the uploaded image.
+
+The palette library is local and versioned. User-created palettes are stored under `sidali-ditherlab:custom-palettes:v1` in the current browser profile. Palette imports use a bounded, versioned JSON schema and are treated as data only. No image or palette information is sent to a service.
+
+Median Cut splits sampled boxes by the largest channel range and uses each box's mean. K-Means uses seeded initialization, a bounded iteration count, and sampled RGB pixels; it is deterministic for fixed inputs and settings but does not guarantee a globally optimal palette. Fully transparent pixels are excluded from extraction. Uniform or limited-color images may yield fewer colors than requested.
+
 ## 📤 Export and Compression
 
 Images are encoded through the browser Canvas API using WebP.
 
-Available controls include:
+Monochrome controls include:
 
 - Output width.
 - Pixel size.
@@ -222,18 +266,25 @@ sidali-ditherlab/
 │       ├── editor-light.png
 │       ├── compare-view.png
 │       ├── mobile-editor.png
-│       └── algorithm-comparison.png
-├── screenshots/
-│   └── application.png
+│       ├── algorithm-comparison.png
+│       ├── color-studio.png
+│       ├── gameboy-palette.png
+│       ├── custom-palette.png
+│       ├── palette-comparison.png
+│       └── mobile-color-studio.png
 ├── tests/
 │   ├── fixtures/
 │   ├── core.test.mjs
-│   └── engine.test.mjs
+│   ├── engine.test.mjs
+│   └── color.test.mjs
 ├── benchmarks/
-│   └── algorithms.mjs
+│   ├── algorithms.mjs
+│   └── color-processing.mjs
 ├── src/
 │   └── engine/
 │       ├── algorithms/
+│       ├── color/
+│       ├── palettes/
 │       ├── utilities/
 │       ├── history.mjs
 │       ├── presets.mjs
@@ -274,6 +325,14 @@ npm run benchmark
 
 The benchmark runs one warm-up and three measured iterations per case; it prints measurements from the current machine and does not encode or assert performance claims.
 
+Run color processing and extraction benchmarks:
+
+```bash
+npm run benchmark:color
+```
+
+This reports median timings for RGB, linear RGB, and Lab image quantization; color Floyd–Steinberg, Atkinson, and Bayer; and sample-bounded Median Cut and K-Means. Extraction uses at most 50,000 sampled visible pixels. Timings are local observations, not performance guarantees.
+
 ## 🗺️ Roadmap
 
 Sidali DitherLab is actively evolving into a more comprehensive open-source image-processing toolkit.
@@ -282,8 +341,8 @@ The following larger product features remain planned and are not part of this br
 
 ### Future Processing Features
 
-- [ ] Custom color palettes.
-- [ ] Retro Game Boy-style color processing.
+- [x] Custom color palettes and full-color dithering.
+- [x] Retro Game Boy-style color processing.
 - [ ] Additional creative image effects.
 
 ### Future Performance and Optimization
@@ -322,6 +381,9 @@ The long-term goal is to let users describe a desired visual result and have Aut
 ## ⚠️ Current Limitations
 
 - Processing runs on the browser's main thread; large images can temporarily block interactions.
+- Full-color image processing is CPU-intensive, especially with larger palettes and Lab matching; benchmark figures are machine-dependent.
+- Color calculations assume sRGB channel values and do not preserve embedded ICC profiles or guarantee color-managed output across browsers.
+- WebP encoding uses the browser's Canvas encoder and configured lossy quality; decoded exports can differ slightly from exact palette RGB values even though the processing buffer and preview use only selected palette entries.
 - Algorithm comparison caps the rendered preview's longest side at 512 pixels to keep comparisons responsive.
 - WebP is the only export format.
 - Large images may take additional processing time.

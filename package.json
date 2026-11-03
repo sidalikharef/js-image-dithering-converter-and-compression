@@ -6,8 +6,9 @@
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check main.js && node --check core.mjs && node --check src/engine/index.mjs && node --check src/engine/registry.mjs && node --check src/engine/history.mjs && node --check src/engine/presets.mjs && node --check benchmarks/algorithms.mjs && node --check tests/engine.test.mjs",
-    "benchmark": "node benchmarks/algorithms.mjs"
+    "check": "node --check main.js && node --check core.mjs && node --check src/engine/index.mjs && node --check src/engine/registry.mjs && node --check src/engine/history.mjs && node --check src/engine/presets.mjs && node --check src/engine/color/color-diffusion.mjs && node --check src/engine/color/palette-extraction.mjs && node --check benchmarks/algorithms.mjs && node --check benchmarks/color-processing.mjs && node --check tests/engine.test.mjs && node --check tests/color.test.mjs",
+    "benchmark": "node benchmarks/algorithms.mjs",
+    "benchmark:color": "node benchmarks/color-processing.mjs"
   },
   "license": "MIT"
 }

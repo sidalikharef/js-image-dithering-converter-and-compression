@@ -2,11 +2,21 @@ import {outputDimensions, processingDimensions, formatBytes} from './core.mjs';
 import {ALGORITHMS, getAlgorithm, processImage} from './src/engine/registry.mjs';
 import {PRESETS, getPreset} from './src/engine/presets.mjs';
 import {createHistory} from './src/engine/history.mjs';
+import {
+  processColorImage, BUILT_IN_PALETTES, PALETTE_CATEGORIES, getPalette, createCustomPalette,
+  updateCustomPalette, loadPalettes, savePalettes, parsePaletteJSON, serializePaletteJSON,
+  extractPalette, COLOR_PRESETS, getColorPreset, validatePaletteColors, hexToRGB, rgbToHex
+} from './src/engine/index.mjs';
 
 const $ = id => document.getElementById(id);
-const controls = ['width', 'grain', 'threshold', 'contrast', 'strength', 'quality', 'algorithm', 'matrixSize', 'orderedStrength', 'seed', 'randomness', 'serpentine', 'preset'];
-const defaults = {width:1200, grain:4, threshold:128, contrast:1, strength:1, quality:.75, algorithm:'floyd-steinberg', matrixSize:4, orderedStrength:1, seed:1, randomness:1, serpentine:false, preset:''};
+const controls = ['width', 'grain', 'threshold', 'contrast', 'strength', 'quality', 'algorithm', 'matrixSize', 'orderedStrength', 'seed', 'randomness', 'serpentine', 'preset', 'mode', 'paletteId', 'distanceMethod', 'alphaMode', 'background', 'brightness', 'colorContrast', 'saturation', 'gamma', 'exposure', 'hue', 'temperature', 'tint'];
+const defaults = {width:1200, grain:4, threshold:128, contrast:1, strength:1, quality:.75, algorithm:'floyd-steinberg', matrixSize:4, orderedStrength:1, seed:1, randomness:1, serpentine:false, preset:'', mode:'monochrome', paletteId:'black-white', distanceMethod:'rgb', alphaMode:'preserve', background:'#FFFFFF', brightness:0, colorContrast:1, saturation:1, gamma:1, exposure:0, hue:0, temperature:0, tint:0};
 const history = createHistory(defaults);
+let activePalette = getPalette('black-white');
+let customPalettes = loadPalettes();
+let extractionDuration = 0;
+let comparisonCache = new Map();
+let sourceRevision = 0;
 let source = null;
 let sourceName = 'image';
 let sourceFileSize = 0;
@@ -20,17 +30,33 @@ let encodingDuration = 0;
 let comparisonSerial = 0;
 
 function getSettings() {
-  return Object.fromEntries(controls.map(id => {
+  const settings = Object.fromEntries(controls.map(id => {
     const element = $(id);
     if (!element) return [id, defaults[id]];
     if (element.type === 'checkbox') return [id, element.checked];
-    if (id === 'algorithm' || id === 'preset') return [id, element.value];
+    if (['algorithm','preset','mode','paletteId','distanceMethod','alphaMode','background'].includes(id)) return [id, element.value];
     return [id, Number(element.value)];
   }));
+  settings.paletteName = activePalette.name;
+  settings.paletteColors = activePalette.colors.slice();
+  return settings;
+}
+
+function readSourcePixels(maxSide=512) {
+  if(!source) throw new Error('Import an image before extracting colors.');
+  const scale=Math.min(1,maxSide/source.width,maxSide/source.height);
+  const width=Math.max(1,Math.round(source.width*scale));
+  const height=Math.max(1,Math.round(source.height*scale));
+  const canvas=document.createElement('canvas');
+  canvas.width=width;canvas.height=height;
+  const context=canvas.getContext('2d',{willReadFrequently:true});
+  if(!context)throw new Error('Could not initialize the palette extraction canvas.');
+  context.drawImage(source,0,0,width,height);
+  return context.getImageData(0,0,width,height);
 }
 
 function sameSettings(a, b) {
-  return controls.every(id => a[id] === b[id]);
+  return JSON.stringify(a) === JSON.stringify(b);
 }
 
 function updateHistoryButtons() {
@@ -51,6 +77,16 @@ function applySettings(settings) {
     if (element.type === 'checkbox') element.checked = !!settings[id];
     else element.value = settings[id] ?? defaults[id];
   }
+  activePalette = {
+    id:settings.paletteId ?? 'black-white',
+    name:settings.paletteName ?? 'Black and White',
+    colors:(settings.paletteColors ?? getPalette(settings.paletteId ?? 'black-white').colors).slice(),
+    category:'Custom',description:'Current processing palette.',colorCount:(settings.paletteColors ?? []).length,
+    editable:true,builtIn:false
+  };
+  if (BUILT_IN_PALETTES.some(item => item.id === activePalette.id)) activePalette = getPalette(activePalette.id);
+  refreshPaletteSelector();
+  renderPaletteEditor();
   updateLabels();
   updateHistoryButtons();
   scheduleRender();
@@ -84,6 +120,29 @@ function updateLabels() {
   if ($('matrixSize')) $('matrixSizeValue').textContent = `${$('matrixSize').value}×${$('matrixSize').value}`;
   if ($('orderedStrength')) $('orderedStrengthValue').textContent = `${Math.round(Number($('orderedStrength').value)*100)}%`;
   if ($('seed')) $('seedValue').textContent = $('seed').value;
+  if ($('mode')) {
+    $('colorSettings').hidden = $('mode').value !== 'color';
+    $('thresholdWrap').hidden = $('mode').value === 'color';
+    $('monoContrastWrap').hidden = $('mode').value === 'color';
+    $('backgroundWrap').hidden = $('alphaMode').value !== 'composite';
+    $('metricMode').textContent = $('mode').value === 'color' ? 'Full color' : 'Monochrome';
+    $('metricColorMethod').textContent = $('mode').value === 'color' ? `${$('distanceMethod').selectedOptions[0].textContent} · ${activePalette.colors.length}` : '—';
+    $('paletteDescription').textContent = activePalette.description ?? 'Custom palette.';
+    $('paletteCount').textContent = `${activePalette.colors.length} colors`;
+    $('brightnessValue').textContent = Number($('brightness').value).toFixed(2);
+    $('colorContrastValue').textContent = `${Number($('colorContrast').value).toFixed(2)}×`;
+    $('saturationValue').textContent = `${Number($('saturation').value).toFixed(2)}×`;
+    $('gammaValue').textContent = Number($('gamma').value).toFixed(2);
+    $('exposureValue').textContent = `${Number($('exposure').value).toFixed(1)} EV`;
+    $('hueValue').textContent = `${$('hue').value}°`;
+    $('temperatureValue').textContent = Number($('temperature').value).toFixed(2);
+    $('tintValue').textContent = Number($('tint').value).toFixed(2);
+  }
+}
+
+function presetName(id) {
+  if(!id)return 'Custom';
+  return PRESETS.find(item=>item.id===id)?.name ?? COLOR_PRESETS.find(item=>item.id===id)?.name ?? 'Custom';
 }
 
 function resolveAlgorithmSettings(settings) {
@@ -97,6 +156,179 @@ function resolveAlgorithmSettings(settings) {
     seed: Number(settings.seed),
     randomness: settings.randomness,
   };
+}
+
+function allPalettes() {
+  const items = [...BUILT_IN_PALETTES, ...customPalettes];
+  if (!items.some(item => item.id === activePalette.id)) items.push(activePalette);
+  return items;
+}
+
+function refreshPaletteSelector() {
+  if (!$('paletteId')) return;
+  const category = $('paletteCategory').value;
+  const query = $('paletteSearch').value.trim().toLowerCase();
+  const items = allPalettes().filter(item =>
+    (!category || item.category === category)
+    && (!query || `${item.name} ${item.description}`.toLowerCase().includes(query))
+  );
+  $('paletteId').replaceChildren(...items.map(item => new Option(`${item.name} · ${item.colorCount ?? item.colors.length}`, item.id)));
+  if (!items.some(item => item.id === activePalette.id)) {
+    $('paletteId').add(new Option(activePalette.name, activePalette.id));
+  }
+  $('paletteId').value = activePalette.id;
+  for (const id of ['comparePaletteA','comparePaletteB']) {
+    if (!$(`${id}`)) continue;
+    const select = $(id);
+    const selected = select.value;
+    select.replaceChildren(...allPalettes().map(item => new Option(item.name, item.id)));
+    select.value = allPalettes().some(item => item.id === selected) ? selected : activePalette.id;
+  }
+}
+
+function updatePaletteSwatches() {
+  const host = $('paletteSwatches');
+  if (!host) return;
+  host.replaceChildren(...activePalette.colors.map((hex,index) => {
+    const swatch = document.createElement('span');
+    swatch.className = 'palette-swatch';
+    swatch.style.backgroundColor = hex;
+    swatch.title = `${index + 1}: ${hex}`;
+    swatch.setAttribute('aria-label', hex);
+    return swatch;
+  }));
+}
+
+function renderPaletteEditor() {
+  if (!$('paletteSwatches')) return;
+  updatePaletteSwatches();
+  $('customPaletteName').value = activePalette.name;
+  const host = $('paletteColorList');
+  host.replaceChildren();
+  activePalette.colors.forEach((hex,index) => {
+    const row = document.createElement('div');
+    row.className = 'palette-color-row';
+    const picker = document.createElement('input');
+    picker.type = 'color'; picker.value = hex; picker.setAttribute('aria-label',`Choose color ${index+1}`);
+    picker.addEventListener('input', () => updatePaletteColor(index,picker.value,false));
+    picker.addEventListener('change', () => commitSettings());
+    const text = document.createElement('input');
+    text.type='text'; text.value=hex; text.maxLength=7; text.setAttribute('aria-label',`Hex value for color ${index+1}`);
+    text.addEventListener('change', () => {
+      try { updatePaletteColor(index,rgbToHex(hexToRGB(text.value)),true); }
+      catch(error) { showPaletteMessage(error.message); text.value=activePalette.colors[index]; }
+    });
+    const up=document.createElement('button');up.type='button';up.className='text-button';up.textContent='↑';up.disabled=index===0;up.setAttribute('aria-label',`Move color ${index+1} up`);
+    up.addEventListener('click',()=>movePaletteColor(index,index-1));
+    const down=document.createElement('button');down.type='button';down.className='text-button';down.textContent='↓';down.disabled=index===activePalette.colors.length-1;down.setAttribute('aria-label',`Move color ${index+1} down`);
+    down.addEventListener('click',()=>movePaletteColor(index,index+1));
+    const remove=document.createElement('button');remove.type='button';remove.className='text-button';remove.textContent='×';remove.disabled=activePalette.colors.length<=2;remove.setAttribute('aria-label',`Remove color ${index+1}`);
+    remove.addEventListener('click',()=>removePaletteColor(index));
+    row.append(picker,text,up,down,remove);
+    host.append(row);
+  });
+  $('deletePalette').disabled=!customPalettes.some(item=>item.id===activePalette.id);
+  $('resetPalette').disabled=!customPalettes.some(item=>item.id===activePalette.id);
+  $('paletteCount').textContent=`${activePalette.colors.length} colors`;
+  refreshPaletteSelector();
+}
+
+function showPaletteMessage(message) {
+  $('paletteMessage').textContent=message;
+}
+
+function setActivePalette(palette,{historyEntry=true}={}) {
+  $('preset').value='';
+  activePalette={...palette,colors:palette.colors.slice(),colorCount:palette.colors.length};
+  $('paletteId').value=activePalette.id;
+  renderPaletteEditor();
+  updateLabels();
+  if(historyEntry) commitSettings();
+  scheduleRender();
+}
+
+function updatePaletteColor(index,hex,renderList=true) {
+  const colors=activePalette.colors.slice();
+  colors[index]=hex;
+  try { activePalette={...activePalette,colors:validatePaletteColors(colors),colorCount:colors.length}; }
+  catch(error) {
+    if(error instanceof RangeError && /duplicates/.test(error.message)) showPaletteMessage('Each palette color must be unique.');
+    else throw error;
+    renderPaletteEditor();
+    return;
+  }
+  $('preset').value='';
+  if(renderList) renderPaletteEditor(); else updatePaletteSwatches();
+  updateLabels();
+  scheduleRender();
+  if(renderList)commitSettings();
+}
+
+function movePaletteColor(from,to) {
+  $('preset').value='';
+  const colors=activePalette.colors.slice();
+  [colors[from],colors[to]]=[colors[to],colors[from]];
+  activePalette={...activePalette,colors};
+  renderPaletteEditor();commitSettings();scheduleRender();
+}
+
+function removePaletteColor(index) {
+  if(activePalette.colors.length<=2)return;
+  $('preset').value='';
+  activePalette={...activePalette,colors:activePalette.colors.filter((_,position)=>position!==index)};
+  renderPaletteEditor();commitSettings();scheduleRender();
+}
+
+function persistCustomPalettes() {
+  const saved=savePalettes(customPalettes);
+  if(!saved) {
+    showPaletteMessage('Browser storage is full or unavailable. Export the palette JSON to keep a copy.');
+    return false;
+  }
+  refreshPaletteSelector();
+  renderPaletteEditor();
+  return true;
+}
+
+function saveActivePalette() {
+  try {
+    $('preset').value='';
+    const previousPalettes=customPalettes.slice();
+    const existing=customPalettes.findIndex(item=>item.id===activePalette.id);
+    const saved=existing>=0
+      ? updateCustomPalette(customPalettes[existing],{name:$('customPaletteName').value,colors:activePalette.colors})
+      : createCustomPalette($('customPaletteName').value,activePalette.colors);
+    if(existing>=0) customPalettes[existing]=saved;
+    else customPalettes.push(saved);
+    const old=activePalette;
+    activePalette=saved;
+    $('paletteId').value=saved.id;
+    if(!persistCustomPalettes()) {
+      activePalette=old;
+      customPalettes=previousPalettes;
+      renderPaletteEditor();
+    }
+    else {showPaletteMessage('Palette saved on this device.');commitSettings();scheduleRender();}
+  } catch(error) { showPaletteMessage(error.message); }
+}
+
+function applyColorPreset(presetId) {
+  const preset=getColorPreset(presetId);
+  const next={...getSettings(),...preset.settings,preset:preset.id};
+  if(preset.settings.paletteId==='adaptive') {
+    if(!source) {showPaletteMessage('Import an image before applying Adaptive 8-Color.');return;}
+    const image=readSourcePixels(512);
+    const result=extractPalette(image,{method:'median-cut',colorCount:8});
+    if(result.colors.length<2) {showPaletteMessage('The source has fewer than two distinct visible colors.');return;}
+    activePalette={id:'adaptive',name:'Adaptive 8-Color',colors:result.colors,category:'Custom',description:'Median Cut palette generated from this image.',colorCount:result.colors.length,editable:true,builtIn:false};
+    next.paletteId=activePalette.id;next.paletteName=activePalette.name;next.paletteColors=activePalette.colors.slice();
+    extractionDuration=result.durationMs;$('extractionTime').textContent=`${result.durationMs.toFixed(2)} ms`;
+  } else {
+    activePalette=getPalette(preset.settings.paletteId);
+    next.paletteId=activePalette.id;next.paletteName=activePalette.name;next.paletteColors=activePalette.colors.slice();
+  }
+  $('preset').value=preset.id;
+  history.push(next);applySettings(next);
 }
 
 function populateSelectors() {
@@ -119,9 +351,20 @@ function populateSelectors() {
   const presetSelect = $('preset');
   presetSelect.replaceChildren(new Option('Custom settings', ''));
   for (const preset of PRESETS) presetSelect.add(new Option(preset.name, preset.id));
+  const colorGroup=document.createElement('optgroup');colorGroup.label='Color presets';
+  for(const preset of COLOR_PRESETS)colorGroup.append(new Option(preset.name,preset.id));
+  presetSelect.append(colorGroup);
+  $('paletteCategory').replaceChildren(new Option('All categories',''));
+  for(const category of PALETTE_CATEGORIES)$('paletteCategory').add(new Option(category,category));
+  refreshPaletteSelector();
+  renderPaletteEditor();
 }
 
 function applyPreset(presetId) {
+  if(COLOR_PRESETS.some(item=>item.id===presetId)) {
+    applyColorPreset(presetId);
+    return;
+  }
   const preset = getPreset(presetId);
   const next = {...getSettings(), ...preset.settings, preset:preset.id};
   history.push(next);
@@ -136,6 +379,9 @@ function populateComparisonSelectors() {
   }
   $('compareAlgorithmA').value = 'floyd-steinberg';
   $('compareAlgorithmB').value = 'atkinson';
+  refreshPaletteSelector();
+  $('comparePaletteA').value='game-boy-classic';
+  $('comparePaletteB').value='pico-8';
 }
 
 async function renderAlgorithmComparison() {
@@ -147,6 +393,12 @@ async function renderAlgorithmComparison() {
   const settings = getSettings();
   const algorithmA = $('compareAlgorithmA').value;
   const algorithmB = $('compareAlgorithmB').value;
+  const paletteA=allPalettes().find(item=>item.id===$('comparePaletteA').value) ?? activePalette;
+  const paletteB=allPalettes().find(item=>item.id===$('comparePaletteB').value) ?? activePalette;
+  $('comparePaletteA').disabled=settings.mode!=='color';
+  $('comparePaletteB').disabled=settings.mode!=='color';
+  $('compareAlgorithmA').disabled=false;
+  $('compareAlgorithmB').disabled=false;
   const dimensions = outputDimensions(source.width, source.height, settings.width);
   const scale = Math.min(1, 512 / dimensions.width, 512 / dimensions.height);
   const previewWidth = Math.max(1, Math.round(dimensions.width * scale));
@@ -163,13 +415,40 @@ async function renderAlgorithmComparison() {
     if (!sampleContext) throw new Error('Could not initialize comparison processing canvas.');
     sampleContext.drawImage(source, 0, 0, logical.width, logical.height);
     const pixels = sampleContext.getImageData(0, 0, logical.width, logical.height);
-    const previewSettings = resolveAlgorithmSettings(settings);
-    const outputA = processImage(pixels, algorithmA, previewSettings);
-    const outputB = processImage(pixels, algorithmB, previewSettings);
+    const colorSettings = {
+      method:settings.distanceMethod,
+      alphaMode:settings.alphaMode,
+      background:settings.background,
+      strength:settings.strength,
+      matrixSize:settings.matrixSize,
+      orderedStrength:settings.orderedStrength,
+      seed:settings.seed,
+      randomness:settings.randomness,
+      serpentine:settings.serpentine,
+      adjustments:{
+        brightness:settings.brightness,contrast:settings.colorContrast,saturation:settings.saturation,
+        gamma:settings.gamma,exposure:settings.exposure,hue:settings.hue,
+        temperature:settings.temperature,tint:settings.tint
+      }
+    };
+    const renderCandidate=(algorithm,palette)=>{
+      const key=JSON.stringify([sourceRevision,logical.width,logical.height,algorithm,settings.mode,settings.mode==='color'?palette.colors:null,colorSettings]);
+      if(comparisonCache.has(key))return comparisonCache.get(key);
+      const start=performance.now();
+      const result=settings.mode==='color'
+        ? processColorImage(pixels,{...colorSettings,algorithm,palette:palette.colors})
+        : processImage(pixels,algorithm,resolveAlgorithmSettings(settings));
+      const measured={output:result,durationMs:performance.now()-start};
+      if(comparisonCache.size>=8)comparisonCache.delete(comparisonCache.keys().next().value);
+      comparisonCache.set(key,measured);
+      return measured;
+    };
+    const outputA = renderCandidate(algorithmA,paletteA);
+    const outputB = renderCandidate(algorithmB,paletteB);
 
-    for (const [canvasId, output, algorithmId, labelId] of [
-      ['compareCanvasA', outputA, algorithmA, 'compareLabelA'],
-      ['compareCanvasB', outputB, algorithmB, 'compareLabelB']
+    for (const [canvasId, output, algorithmId, palette,labelId,durationMs] of [
+      ['compareCanvasA', outputA.output, algorithmA,paletteA, 'compareLabelA',outputA.durationMs],
+      ['compareCanvasB', outputB.output, algorithmB,paletteB, 'compareLabelB',outputB.durationMs]
     ]) {
       const canvas = $(canvasId);
       canvas.width = previewWidth;
@@ -188,7 +467,9 @@ async function renderAlgorithmComparison() {
         smallContext.putImageData(new ImageData(output.data, output.width, output.height), 0, 0);
         context.drawImage(small, 0, 0, previewWidth, previewHeight);
       }
-      $(labelId).textContent = getAlgorithm(algorithmId).name;
+      $(labelId).textContent = settings.mode==='color'
+        ? `${getAlgorithm(algorithmId).name} · ${palette.name} · ${palette.colors.length} colors · ${durationMs.toFixed(2)} ms`
+        : `${getAlgorithm(algorithmId).name} · ${durationMs.toFixed(2)} ms`;
     }
     if (serial === comparisonSerial) {
       $('compareStatus').textContent = `Rendered ${previewWidth} × ${previewHeight} previews from the original image.`;
@@ -202,7 +483,13 @@ async function renderAlgorithmComparison() {
 
 function applyComparisonResult(side) {
   const algorithm = $(side === 'a' ? 'compareAlgorithmA' : 'compareAlgorithmB').value;
+  const paletteId=$(`comparePalette${side.toUpperCase()}`).value;
+  const palette=allPalettes().find(item=>item.id===paletteId);
   const next = {...getSettings(), algorithm, preset:''};
+  if(next.mode==='color'&&palette) {
+    activePalette={...palette,colors:palette.colors.slice()};
+    next.paletteId=palette.id;next.paletteName=palette.name;next.paletteColors=palette.colors.slice();
+  }
   history.push(next);
   applySettings(next);
   $('preset').value = '';
@@ -275,6 +562,27 @@ function updateComparison() {
   $('compareValue').textContent = `${value}%`;
 }
 
+function colorProcessingSettings(settings) {
+  return {
+    palette:activePalette.colors,
+    method:settings.distanceMethod,
+    algorithm:settings.algorithm,
+    alphaMode:settings.alphaMode,
+    background:settings.background,
+    strength:settings.strength,
+    matrixSize:settings.matrixSize,
+    orderedStrength:settings.orderedStrength,
+    seed:settings.seed,
+    randomness:settings.randomness,
+    serpentine:settings.serpentine,
+    adjustments:{
+      brightness:settings.brightness,contrast:settings.colorContrast,saturation:settings.saturation,
+      gamma:settings.gamma,exposure:settings.exposure,hue:settings.hue,
+      temperature:settings.temperature,tint:settings.tint
+    }
+  };
+}
+
 async function render() {
   const serial = ++renderSerial;
   latestBlob = null;
@@ -284,7 +592,10 @@ async function render() {
   $('processingTime').textContent = '—';
   $('encodingTime').textContent = '—';
   $('metricAlgorithm').textContent = getAlgorithm(settings.algorithm).name;
-  $('metricPreset').textContent = settings.preset ? getPreset(settings.preset).name : 'Custom';
+  $('metricPreset').textContent = presetName(settings.preset);
+  $('metricMode').textContent = settings.mode==='color' ? `Color · ${activePalette.name}` : 'Monochrome';
+  $('metricColorMethod').textContent = settings.mode==='color' ? `${settings.distanceMethod} · ${activePalette.colors.length} colors` : '—';
+  $('metricExtraction').textContent = extractionDuration ? `${extractionDuration.toFixed(2)} ms` : '—';
   $('status').textContent = 'Rendering image…';
   $('statusDot').className = 'processing';
   try {
@@ -301,7 +612,9 @@ async function render() {
     lowContext.drawImage(source, 0, 0, logical.width, logical.height);
     const pixels = lowContext.getImageData(0, 0, logical.width, logical.height);
     const processStart = performance.now();
-    const dithered = processImage(pixels, settings.algorithm, resolveAlgorithmSettings(settings));
+    const dithered = settings.mode==='color'
+      ? processColorImage(pixels,colorProcessingSettings(settings))
+      : processImage(pixels, settings.algorithm, resolveAlgorithmSettings(settings));
     processingDuration = performance.now() - processStart;
     lowContext.putImageData(new ImageData(dithered.data, logical.width, logical.height), 0, 0);
 
@@ -331,7 +644,7 @@ async function render() {
     $('processingTime').textContent = `${processingDuration.toFixed(2)} ms`;
     $('encodingTime').textContent = `${encodingDuration.toFixed(2)} ms`;
     $('metricAlgorithm').textContent = getAlgorithm(settings.algorithm).name;
-    $('metricPreset').textContent = settings.preset ? getPreset(settings.preset).name : 'Custom';
+    $('metricPreset').textContent = presetName(settings.preset);
     $('target').textContent = blob.size < 30 * 1024 ? 'Under target' : 'Above target';
     $('target').className = blob.size < 30 * 1024 ? 'target-good' : '';
     $('download').disabled = false;
@@ -384,6 +697,14 @@ for (const id of controls) {
     });
     continue;
   }
+  if(id==='paletteId') {
+    el.addEventListener('change',()=>{
+      const palette=allPalettes().find(item=>item.id===el.value);
+      if($('preset').value)$('preset').value='';
+      if(palette)setActivePalette(palette);
+    });
+    continue;
+  }
   el.addEventListener('input', () => {
     if (id !== 'quality' && $('preset').value) $('preset').value = '';
     updateLabels();
@@ -425,6 +746,9 @@ async function chooseFile(file) {
     }
     if (source && typeof source.close === 'function') source.close();
     source = image;
+      sourceRevision++;
+      comparisonCache.clear();
+      extractionDuration = 0;
     sourceFileSize = file.size;
     sourceName = file.name;
     $('filename').textContent = file.name;
@@ -478,6 +802,95 @@ for (const button of document.querySelectorAll('.apply-compare')) {
 }
 $('compareAlgorithmA').addEventListener('change', renderAlgorithmComparison);
 $('compareAlgorithmB').addEventListener('change', renderAlgorithmComparison);
+$('paletteCategory').addEventListener('change',refreshPaletteSelector);
+$('paletteSearch').addEventListener('input',refreshPaletteSelector);
+$('newPalette').addEventListener('click',()=>{
+  try {
+    const palette=createCustomPalette('My Palette',activePalette.colors.slice(0,Math.max(2,Math.min(activePalette.colors.length,8))));
+    setActivePalette(palette);
+    $('customPaletteName').value=palette.name;
+    showPaletteMessage('New unsaved palette created. Edit colors, then save locally.');
+  } catch(error) {showPaletteMessage(error.message);}
+});
+$('duplicatePalette').addEventListener('click',()=>{
+  try {
+    const palette=createCustomPalette(`${activePalette.name} Copy`,activePalette.colors);
+    setActivePalette(palette);
+    $('customPaletteName').value=palette.name;
+    showPaletteMessage('Palette duplicated. Save locally to keep it after reload.');
+  } catch(error) {showPaletteMessage(error.message);}
+});
+$('addPaletteColor').addEventListener('click',()=>{
+  if(activePalette.colors.length>=256){showPaletteMessage('A palette can contain at most 256 colors.');return;}
+  const candidates=['#B6F36B','#FF6B6B','#4ECDC4','#FFE66D','#7B61FF'];
+  const color=candidates.find(item=>!activePalette.colors.includes(item)) ?? rgbToHex([Math.floor(Math.random()*256),Math.floor(Math.random()*256),Math.floor(Math.random()*256)]);
+  if(activePalette.colors.includes(color)){showPaletteMessage('Choose a unique color before adding another.');return;}
+  $('preset').value='';
+  activePalette={...activePalette,colors:[...activePalette.colors,color]};
+  renderPaletteEditor();commitSettings();scheduleRender();
+});
+$('customPaletteName').addEventListener('change',()=>{
+  try {
+    $('preset').value='';
+    activePalette=updateCustomPalette({...activePalette,builtIn:false},{name:$('customPaletteName').value});
+    renderPaletteEditor();commitSettings();scheduleRender();showPaletteMessage('Palette name updated. Save locally to persist it.');
+  }catch(error){showPaletteMessage(error.message);$('customPaletteName').value=activePalette.name;}
+});
+$('savePalette').addEventListener('click',saveActivePalette);
+$('deletePalette').addEventListener('click',()=>{
+  const index=customPalettes.findIndex(item=>item.id===activePalette.id);
+  if(index<0)return;
+  const previous=customPalettes.slice();
+  customPalettes.splice(index,1);
+  if(!persistCustomPalettes()){customPalettes=previous;return;}
+  setActivePalette(getPalette('black-white'));
+  showPaletteMessage('Saved palette deleted.');
+});
+$('resetPalette').addEventListener('click',()=>{
+  const builtIn=BUILT_IN_PALETTES.find(item=>item.id===activePalette.id);
+  const saved=customPalettes.find(item=>item.id===activePalette.id);
+  if(builtIn)setActivePalette(builtIn);
+  else if(saved)setActivePalette(saved);
+  else showPaletteMessage('This unsaved palette has no saved version to restore.');
+});
+$('importPalette').addEventListener('click',()=>$('paletteFile').click());
+$('paletteFile').addEventListener('change',async event=>{
+  const file=event.target.files?.[0];event.target.value='';
+  if(!file)return;
+  try {
+    if(file.size>64*1024)throw new RangeError('Palette JSON must be no larger than 64 KiB.');
+    const imported=parsePaletteJSON(await file.text());
+    const palette=createCustomPalette(imported.name,imported.colors);
+    setActivePalette(palette);
+    $('customPaletteName').value=palette.name;
+    showPaletteMessage('Palette imported. Save locally to keep it after reload.');
+  }catch(error){showPaletteMessage(error.message);}
+});
+$('exportPalette').addEventListener('click',()=>{
+  try {
+    const blob=new Blob([serializePaletteJSON({name:activePalette.name,colors:activePalette.colors})],{type:'application/json'});
+    const url=URL.createObjectURL(blob);const link=document.createElement('a');
+    link.href=url;link.download=`${activePalette.name.toLowerCase().replace(/[^a-z0-9]+/g,'-')}.json`;
+    document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),10000);
+    showPaletteMessage('Palette JSON exported.');
+  }catch(error){showPaletteMessage(error.message);}
+});
+$('extractPalette').addEventListener('click',()=>{
+  try {
+    if(!source)throw new Error('Import an image before extracting a palette.');
+    const result=extractPalette(readSourcePixels(512),{
+      method:$('extractionMethod').value,colorCount:Number($('colorCount').value),seed:Number($('seed').value)
+    });
+    extractionDuration=result.durationMs;
+    $('extractionTime').textContent=`${result.durationMs.toFixed(2)} ms · ${result.colors.length} colors`;
+    if(result.colors.length<2)throw new Error('The image has fewer than two distinct visible colors; it cannot form a dither palette.');
+    const palette=createCustomPalette(`Extracted ${result.colors.length}-Color`,result.colors);
+    setActivePalette(palette);
+    $('mode').value='color';updateLabels();commitSettings();
+    showPaletteMessage(`${result.method==='k-means'?'K-Means':'Median Cut'} generated ${result.colors.length} colors in ${result.durationMs.toFixed(2)} ms. Save locally to reuse it.`);
+  }catch(error){showPaletteMessage(error.message);}
+});
+for(const id of ['comparePaletteA','comparePaletteB'])$(id).addEventListener('change',renderAlgorithmComparison);
 $('zoomIn').addEventListener('click', () => {
   fitZoom = false;
   zoom = Math.min(4, zoom * 1.25);
