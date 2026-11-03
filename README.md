@@ -1,16 +1,19 @@
-# Sidali DitherLab
-
 <div align="center">
 
-<img src="./assets/dither-orbit.svg" alt="Sidali DitherLab Logo" width="100" />
+<img src="./assets/dither-orbit.svg" alt="Dither Orbit logo" width="112" />
 
-# Every Pixel, Perfected.
+<h1>Sidali DitherLab</h1>
 
-**A modern, open-source monochrome and full-color image-processing studio.**
+<p><strong>Every Pixel, Perfected.</strong></p>
 
-Transform images into monochrome or palette-based pixel artwork with precision controls, custom palettes, real-time comparisons, and privacy-first processing.
+<p>A privacy-first monochrome and full-color dithering studio for creating and comparing pixel artwork in your browser.</p>
 
-[**🚀 Live Demo**](https://ditterlab.sidalikharef.cc) · [**🌐 Portfolio**](https://sidalikharef.cc) · [**💻 GitHub**](https://github.com/sidalikharef)
+<p>
+  <a href="https://ditterlab.sidalikharef.cc/">Live Demo</a> ·
+  <a href="https://sidalikharef.cc/">Portfolio</a> ·
+  <a href="https://github.com/sidalikharef">GitHub</a> ·
+  <a href="https://www.linkedin.com/in/sid-ali-kharef-b5195419b/">LinkedIn</a>
+</p>
 
 ![License](https://img.shields.io/badge/License-MIT-B6F36B?style=flat-square)
 ![JavaScript](https://img.shields.io/badge/JavaScript-ES_Modules-F7DF1E?style=flat-square&logo=javascript&logoColor=black)
@@ -21,7 +24,7 @@ Transform images into monochrome or palette-based pixel artwork with precision c
 
 ---
 
-![Sidali DitherLab Social Preview](./assets/social-preview.png)
+![Sidali DitherLab — Graphite, Electric Lime, and the Dither Orbit emblem](./assets/social-preview.png)
 
 ## ✨ Overview
 
@@ -35,51 +38,27 @@ Designed for developers, digital artists, designers, and anyone interested in ex
 
 ### 🌐 Try It Online
 
-**[Launch Sidali DitherLab →](https://ditterlab.sidalikharef.cc)**
+**[Launch Sidali DitherLab →](https://ditterlab.sidalikharef.cc/)**
 
 No installation, account, or image upload to a server required.
 
 ## 📸 Screenshots
 
-### Professional Editor — Dark Theme
+| Editor — Dark Theme | Editor — Light Theme |
+|---|---|
+| ![Sidali DitherLab dark editor](./assets/screenshots/editor-dark.png) | ![Sidali DitherLab light editor](./assets/screenshots/editor-light.png) |
 
-![Sidali DitherLab Dark Editor](./assets/screenshots/editor-dark.png)
+| Algorithm Comparison | Color Palette Studio |
+|---|---|
+| ![Dither algorithm comparison](./assets/screenshots/algorithm-comparison.png) | ![Color Palette Studio](./assets/screenshots/color-studio.png) |
 
-### Light Theme
+| Game Boy Palette | Custom Palette Editor |
+|---|---|
+| ![Game Boy palette processing](./assets/screenshots/gameboy-palette.png) | ![Custom palette editor](./assets/screenshots/custom-palette.png) |
 
-![Sidali DitherLab Light Editor](./assets/screenshots/editor-light.png)
-
-### Before & After Comparison
-
-![Sidali DitherLab Compare View](./assets/screenshots/compare-view.png)
-
-### Responsive Mobile Experience
-
-![Sidali DitherLab Mobile Editor](./assets/screenshots/mobile-editor.png)
-
-### Algorithm Comparison
-
-![Sidali DitherLab algorithm comparison](./assets/screenshots/algorithm-comparison.png)
-
-### Color Palette Studio
-
-![Sidali DitherLab color studio](./assets/screenshots/color-studio.png)
-
-### Game Boy Palette
-
-![Sidali DitherLab Game Boy palette](./assets/screenshots/gameboy-palette.png)
-
-### Custom Palette Editor
-
-![Sidali DitherLab custom palette editor](./assets/screenshots/custom-palette.png)
-
-### Palette Comparison
-
-![Sidali DitherLab palette comparison](./assets/screenshots/palette-comparison.png)
-
-### Mobile Color Studio
-
-![Sidali DitherLab mobile color studio](./assets/screenshots/mobile-color-studio.png)
+| Palette Comparison | Mobile Color Studio |
+|---|---|
+| ![Palette comparison workspace](./assets/screenshots/palette-comparison.png) | ![Color Palette Studio on mobile](./assets/screenshots/mobile-color-studio.png) |
 
 > The screenshots were captured from the actual running application using original sample artwork included in this repository.
 
@@ -147,7 +126,7 @@ No installation, account, or image upload to a server required.
 
 Open the live application:
 
-**https://ditterlab.sidalikharef.cc**
+**https://ditterlab.sidalikharef.cc/**
 
 Upload an image, adjust the dithering parameters, compare the result, and export your optimized artwork.
 
@@ -249,6 +228,8 @@ The reported output size is based on the actual encoded blob.
 
 ## 🏗️ Project Structure
 
+The application is built with native JavaScript ES modules and has no runtime or development package dependencies. The algorithm registry connects the nine monochrome and color-processing choices to shared validation, quantization, luminance, seeded-random, and error-diffusion utilities. Color-space conversion and distance calculations are isolated from palette validation, extraction, and quantization. The browser UI in `main.js` connects those modules to the editor controls and Canvas-based image pipeline. Node.js's built-in test runner exercises the engine, and separate scripts benchmark monochrome algorithms and color processing.
+
 ```text
 sidali-ditherlab/
 ├── assets/
@@ -273,7 +254,7 @@ sidali-ditherlab/
 │       ├── palette-comparison.png
 │       └── mobile-color-studio.png
 ├── tests/
-│   ├── fixtures/
+│   ├── fixtures/algorithm-images.mjs
 │   ├── core.test.mjs
 │   ├── engine.test.mjs
 │   └── color.test.mjs
@@ -287,6 +268,7 @@ sidali-ditherlab/
 │       ├── palettes/
 │       ├── utilities/
 │       ├── history.mjs
+│       ├── index.mjs
 │       ├── presets.mjs
 │       ├── registry.mjs
 │       └── validation.mjs
@@ -335,61 +317,24 @@ This reports median timings for RGB, linear RGB, and Lab image quantization; col
 
 ## 🗺️ Roadmap
 
-Sidali DitherLab is actively evolving into a more comprehensive open-source image-processing toolkit.
+These are planned future phases, not features currently available in the application:
 
-The following larger product features remain planned and are not part of this browser-only phase.
-
-### Future Processing Features
-
-- [x] Custom color palettes and full-color dithering.
-- [x] Retro Game Boy-style color processing.
-- [ ] Additional creative image effects.
-
-### Future Performance and Optimization
-
-- [ ] Web Worker processing.
-- [ ] Batch image conversion.
-- [ ] Additional export formats.
-- [ ] Improved image compression.
-
-### Future Developer Toolkit
-
-- [ ] TypeScript processing library.
-- [ ] NPM package.
-- [ ] Command-line interface.
-- [ ] React integration.
-- [ ] Dedicated documentation.
-- [ ] Monorepo architecture.
-
-### Future Sidali AutoLab
-
-**An experimental, local-first autonomous image-processing assistant.**
-
-Planned capabilities include:
-
-- [ ] Natural-language image-processing instructions.
-- [ ] Automatic dithering-parameter exploration.
-- [ ] Intelligent palette recommendations.
-- [ ] Automated compression experiments.
-- [ ] Visual quality evaluation.
-- [ ] Multi-candidate comparison.
-- [ ] Local AI model integration.
-- [ ] Optimization workflows without mandatory paid AI APIs.
-
-The long-term goal is to let users describe a desired visual result and have AutoLab explore suitable configurations automatically.
+- **Phase E — Performance:** Web Workers, batch processing, and advanced export.
+- **Phase F — Developer toolkit:** TypeScript SDK, NPM library, CLI, and monorepo.
+- **Phase G — DitherLab experiment workspace:** A dedicated space for future image-processing experiments.
+- **Phase H — Sidali AutoLab:** Local-first intelligent optimization agents for exploring image-processing settings.
+- **Phase I — Open-source v1.0 release.**
 
 ## ⚠️ Current Limitations
 
 - Processing runs on the browser's main thread; large images can temporarily block interactions.
 - Full-color image processing is CPU-intensive, especially with larger palettes and Lab matching; benchmark figures are machine-dependent.
 - Color calculations assume sRGB channel values and do not preserve embedded ICC profiles or guarantee color-managed output across browsers.
-- WebP encoding uses the browser's Canvas encoder and configured lossy quality; decoded exports can differ slightly from exact palette RGB values even though the processing buffer and preview use only selected palette entries.
+- WebP encoding uses the browser-specific Canvas encoder; supported output and encoding behavior may vary between browsers. Configured WebP quality is lossy, so decoded exports can differ slightly from exact palette RGB values even though the processing buffer and preview use only selected palette entries.
 - Algorithm comparison caps the rendered preview's longest side at 512 pixels to keep comparisons responsive.
 - WebP is the only export format.
-- Large images may take additional processing time.
-- Browser Canvas limits and encoder support vary.
-- Comparison previews are bounded to 512 pixels on their longest edge; exported output retains the configured full dimensions.
-- Batch processing, CLI tools, TypeScript packages, and AI features are not yet available.
+- Browser Canvas dimensions, memory limits, and encoder support vary.
+- Batch processing, Web Workers, a CLI, TypeScript packages, and AI optimization agents are not yet available; see the future roadmap.
 - Offline PWA support is not implemented.
 
 ## 🤝 Contributing
@@ -406,7 +351,7 @@ Please keep changes focused, document behavioral changes, and run the available 
 
 Sidali DitherLab is released under the **MIT License**.
 
-See [LICENSE](./LICENSE) for the complete license terms and copyright notices.
+See [LICENSE](./LICENSE) for the complete MIT license terms and copyright notices. Any applicable upstream or third-party notices must remain with the code to which they apply.
 
 The current application declares no third-party runtime dependencies.
 
@@ -416,7 +361,7 @@ The current application declares no third-party runtime dependencies.
 
 Software Developer & Open-Source Enthusiast
 
-Creator and maintainer of Sidali DitherLab.
+Maintainer of Sidali DitherLab.
 
 | Platform | Link |
 |---|---|
