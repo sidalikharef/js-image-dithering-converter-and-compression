@@ -335,6 +335,28 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--color-ac
 .batch-state[data-state="failed"] { color:var(--color-error); }
 .batch-state[data-state="running"] { color:var(--color-processing); }
 [hidden] { display: none !important; }
+.transform-section, .adjustments-section, .editor-presets-section { margin-top: 24px; }
+.geometry-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.geometry-actions .text-button { min-height: 27px; padding: 0 7px; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-surface-raised); color: var(--color-text); }
+.toggle-control { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.toggle-control label { margin: 0; }
+.toggle-control input { margin: 0; }
+.preset-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.preset-actions .text-button { padding: 4px 7px; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-surface-raised); }
+.hold-original { min-height: 27px; padding: 0 7px; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-surface-raised); color: var(--color-text); }
+.zoom-tools { flex-wrap: wrap; }
+.canvas-stage.holding-original #originalCanvas { visibility: visible !important; }
+.canvas-stage.holding-original #outputCanvas { visibility: hidden !important; }
+.canvas-stage.holding-original #outputCanvas { clip-path: none; }
+.canvas-stage[data-view="side-by-side"] #originalCanvas, .canvas-stage[data-view="side-by-side"] #outputCanvas { visibility: visible; }
+.compare-line { pointer-events: auto; cursor: ew-resize; touch-action: none; }
+.compare-line:focus-visible { outline: 2px solid var(--color-accent-foreground); outline-offset: 3px; }
+.shortcuts-dialog { width: min(520px, calc(100vw - 32px)); max-height: min(90vh, 700px); overflow: auto; }
+.shortcut-list { display: grid; gap: 8px; margin: 18px 0 0; }
+.shortcut-list dt { color: var(--color-text-muted); font-size: 10px; }
+.shortcut-list dd { margin: 2px 0 0; color: var(--color-text); font-size: 10px; }
+.shortcut-list kbd { display: inline-block; min-width: 18px; padding: 2px 5px; border: 1px solid var(--color-border); border-bottom-width: 2px; border-radius: 4px; background: var(--color-surface-raised); color: var(--color-text); font: 8px "JetBrains Mono", monospace; text-align: center; }
+
 @media (min-width: 1400px) {
   .editor { grid-template-columns: 268px minmax(0, 1fr) 300px; }
   .sidebar { padding-right: 21px; padding-left: 21px; }

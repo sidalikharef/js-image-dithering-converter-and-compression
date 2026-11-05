@@ -1,6 +1,7 @@
 import {processImage} from '../engine/registry.mjs';
 import {processColorImage} from '../engine/color/color-diffusion.mjs';
 import {extractPalette} from '../engine/color/palette-extraction.mjs';
+import {processEditorImage} from '../editor/pipeline.mjs';
 import {
   createWorkerResponse, serializeWorkerError, validateWorkerRequest
 } from './worker-protocol.mjs';
@@ -33,6 +34,21 @@ export function runWorkerOperation(request) {
     const output = payload.mode === 'color'
       ? processColorImage(image, payload.options)
       : processImage(image, payload.algorithm, payload.options);
+    return {width:output.width,height:output.height,buffer:output.data.buffer,processingMs:performance.now()-started};
+  }
+  if (request.type === 'process-editor-image') {
+    const started=performance.now();
+    const output = processEditorImage(typedPixels(payload), {
+      geometry:payload.geometry,
+      adjustments:payload.adjustments,
+      mode:payload.mode,
+      algorithm:payload.algorithm,
+      options:payload.options,
+      palette:payload.palette,
+      paletteMethod:payload.paletteMethod,
+      alphaMode:payload.alphaMode,
+      background:payload.background
+    });
     return {width:output.width,height:output.height,buffer:output.data.buffer,processingMs:performance.now()-started};
   }
   throw Object.assign(new RangeError('Unsupported worker operation.'), {code:'UNKNOWN_OPERATION'});

@@ -1,6 +1,7 @@
 export const WORKER_PROTOCOL_VERSION = 1;
 export const WORKER_OPERATIONS = Object.freeze([
   'process-image',
+  'process-editor-image',
   'extract-palette',
   'compare-images',
   'get-capabilities'

@@ -5,7 +5,8 @@ import {createHistory} from './src/engine/history.mjs';
 import {
   processColorImage, BUILT_IN_PALETTES, PALETTE_CATEGORIES, getPalette, createCustomPalette,
   updateCustomPalette, loadPalettes, savePalettes, parsePaletteJSON, serializePaletteJSON,
-  extractPalette, COLOR_PRESETS, getColorPreset, validatePaletteColors, hexToRGB, rgbToHex
+  extractPalette, COLOR_PRESETS, getColorPreset, validatePaletteColors, hexToRGB, rgbToHex,
+  DEFAULT_ADJUSTMENTS
 } from './src/engine/index.mjs';
 import {createImageProcessor} from './src/workers/worker-client.mjs';
 import {JobScheduler} from './src/workers/job-scheduler.mjs';
@@ -15,12 +16,24 @@ import {safeOutputFilename} from './src/export/filename.mjs';
 import {BatchQueue} from './src/batch/batch-queue.mjs';
 import {createStoredZip} from './src/batch/zip-writer.mjs';
 import {ResourceManager} from './src/utilities/resource-manager.mjs';
+import {DEFAULT_GEOMETRY, applyGeometryOperation, geometryLabel, isIdentityGeometry, transformedDimensions, validateGeometry} from './src/editor/transforms.mjs';
+import {DEFAULT_SETTINGS, normalizeSettings} from './src/editor/state.mjs';
+import {adjustmentsFromSettings} from './src/editor/adjustments.mjs';
+import {createPresetStore} from './src/editor/presets.mjs';
+import {createSessionStore} from './src/editor/session.mjs';
 
 const $ = id => document.getElementById(id);
-const controls = ['width', 'grain', 'threshold', 'contrast', 'strength', 'quality', 'algorithm', 'matrixSize', 'orderedStrength', 'seed', 'randomness', 'serpentine', 'preset', 'mode', 'paletteId', 'distanceMethod', 'alphaMode', 'background', 'brightness', 'colorContrast', 'saturation', 'gamma', 'exposure', 'hue', 'temperature', 'tint'];
+const controls = ['width', 'grain', 'threshold', 'contrast', 'strength', 'quality', 'algorithm', 'matrixSize', 'orderedStrength', 'seed', 'randomness', 'serpentine', 'preset', 'mode', 'paletteId', 'distanceMethod', 'alphaMode', 'background', 'brightness', 'adjustContrast', 'saturation', 'gamma', 'exposure', 'hue', 'temperature', 'tint', 'grayscale', 'invert'];
 const MAX_OUTPUT_PIXELS=20_000_000;
-const defaults = {width:1200, grain:4, threshold:128, contrast:1, strength:1, quality:.75, algorithm:'floyd-steinberg', matrixSize:4, orderedStrength:1, seed:1, randomness:1, serpentine:false, preset:'', mode:'monochrome', paletteId:'black-white', distanceMethod:'rgb', alphaMode:'preserve', background:'#FFFFFF', brightness:0, colorContrast:1, saturation:1, gamma:1, exposure:0, hue:0, temperature:0, tint:0};
+const defaults = {...DEFAULT_SETTINGS, geometry:{...DEFAULT_GEOMETRY}};
 const history = createHistory(defaults);
+const presetStore = createPresetStore();
+const sessionStore = createSessionStore();
+let geometry = {...DEFAULT_GEOMETRY};
+let applyingSettings = false;
+let spacePressed = false;
+let panState = null;
+let holdingOriginal = false;
 let activePalette = getPalette('black-white');
 let customPalettes = loadPalettes();
 let extractionDuration = 0;
@@ -65,7 +78,31 @@ function getSettings() {
   }));
   settings.paletteName = activePalette.name;
   settings.paletteColors = activePalette.colors.slice();
+  settings.geometry = {...geometry};
   return settings;
+}
+
+function drawSourceTransformed(context, image, value, width, height) {
+  const transform = validateGeometry(value);
+  const swapped = transform.rotation === 90 || transform.rotation === 270;
+  const drawWidth = swapped ? height : width;
+  const drawHeight = swapped ? width : height;
+  context.save();
+  context.translate(width / 2, height / 2);
+  context.rotate(transform.rotation * Math.PI / 180);
+  if (transform.mirrored) context.scale(-1, 1);
+  context.drawImage(image, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+  context.restore();
+}
+
+function scheduleSessionSave() {
+  if (applyingSettings) return;
+  sessionStore.schedule({
+    settings: getSettings(),
+    geometry,
+    view: $('canvasStage').dataset.view || 'processed',
+    theme: document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'
+  });
 }
 
 function readSourcePixels(maxSide=512) {
@@ -90,32 +127,48 @@ function updateHistoryButtons() {
   $('redo').disabled = !history.canRedo;
 }
 
-function commitSettings() {
+function commitSettings(options = {}) {
+  if (applyingSettings) return;
   const current = getSettings();
-  if (!history.push(current)) return;
+  if (!history.push(current, options)) return;
   updateHistoryButtons();
+  scheduleSessionSave();
 }
 
 function applySettings(settings) {
-  for (const id of controls) {
-    const element = $(id);
-    if (!element) continue;
-    if (element.type === 'checkbox') element.checked = !!settings[id];
-    else element.value = settings[id] ?? defaults[id];
+  applyingSettings = true;
+  try {
+    for (const id of controls) {
+      const element = $(id);
+      if (!element) continue;
+      if (element.type === 'checkbox') element.checked = !!settings[id];
+      else element.value = settings[id] ?? defaults[id];
+    }
+    if (settings.geometry) geometry = validateGeometry(settings.geometry);
+    const paletteId = settings.paletteId ?? 'black-white';
+    let paletteColors = settings.paletteColors;
+    if (!Array.isArray(paletteColors) || paletteColors.length < 2) {
+      try { paletteColors = getPalette(paletteId).colors.slice(); }
+      catch { paletteColors = activePalette.colors.slice(); }
+    }
+    activePalette = {
+      id:paletteId,
+      name:settings.paletteName ?? 'Black and White',
+      colors:paletteColors.slice(),
+      category:'Custom',description:'Current processing palette.',colorCount:paletteColors.length,
+      editable:true,builtIn:false
+    };
+    if (BUILT_IN_PALETTES.some(item => item.id === activePalette.id)) activePalette = getPalette(activePalette.id);
+    $('editorPreset').value = '';
+    refreshPaletteSelector();
+    renderPaletteEditor();
+    updateLabels();
+    updateHistoryButtons();
+  } finally {
+    applyingSettings = false;
   }
-  activePalette = {
-    id:settings.paletteId ?? 'black-white',
-    name:settings.paletteName ?? 'Black and White',
-    colors:(settings.paletteColors ?? getPalette(settings.paletteId ?? 'black-white').colors).slice(),
-    category:'Custom',description:'Current processing palette.',colorCount:(settings.paletteColors ?? []).length,
-    editable:true,builtIn:false
-  };
-  if (BUILT_IN_PALETTES.some(item => item.id === activePalette.id)) activePalette = getPalette(activePalette.id);
-  refreshPaletteSelector();
-  renderPaletteEditor();
-  updateLabels();
-  updateHistoryButtons();
   scheduleRender();
+  scheduleSessionSave();
 }
 
 function updateLabels() {
@@ -155,15 +208,20 @@ function updateLabels() {
     $('metricColorMethod').textContent = $('mode').value === 'color' ? `${$('distanceMethod').selectedOptions[0].textContent} · ${activePalette.colors.length}` : '—';
     $('paletteDescription').textContent = activePalette.description ?? 'Custom palette.';
     $('paletteCount').textContent = `${activePalette.colors.length} colors`;
-    $('brightnessValue').textContent = Number($('brightness').value).toFixed(2);
-    $('colorContrastValue').textContent = `${Number($('colorContrast').value).toFixed(2)}×`;
-    $('saturationValue').textContent = `${Number($('saturation').value).toFixed(2)}×`;
-    $('gammaValue').textContent = Number($('gamma').value).toFixed(2);
-    $('exposureValue').textContent = `${Number($('exposure').value).toFixed(1)} EV`;
-    $('hueValue').textContent = `${$('hue').value}°`;
-    $('temperatureValue').textContent = Number($('temperature').value).toFixed(2);
-    $('tintValue').textContent = Number($('tint').value).toFixed(2);
   }
+  if ($('brightness')) $('brightnessValue').textContent = $('brightness').value;
+  if ($('adjustContrast')) $('adjustContrastValue').textContent = $('adjustContrast').value;
+  if ($('saturation')) $('saturationValue').textContent = $('saturation').value;
+  if ($('gamma')) $('gammaValue').textContent = Number($('gamma').value).toFixed(2);
+  if ($('exposure')) $('exposureValue').textContent = `${Number($('exposure').value).toFixed(1)} EV`;
+  if ($('hue')) $('hueValue').textContent = `${$('hue').value}°`;
+  if ($('temperature')) $('temperatureValue').textContent = Number($('temperature').value).toFixed(2);
+  if ($('tint')) $('tintValue').textContent = Number($('tint').value).toFixed(2);
+  if ($('geometryLabel')) $('geometryLabel').textContent = geometryLabel(geometry);
+}
+
+function updateGeometryLabel() {
+  if ($('geometryLabel')) $('geometryLabel').textContent = geometryLabel(geometry);
 }
 
 function presetName(id) {
@@ -340,6 +398,8 @@ function saveActivePalette() {
 
 function applyColorPreset(presetId) {
   const preset=getColorPreset(presetId);
+  $('preset').value=preset.id;
+  $('editorPreset').value='';
   const next={...getSettings(),...preset.settings,preset:preset.id};
   if(preset.settings.paletteId==='adaptive') {
     if(!source) {showPaletteMessage('Import an image before applying Adaptive 8-Color.');return;}
@@ -349,11 +409,10 @@ function applyColorPreset(presetId) {
     activePalette={id:'adaptive',name:'Adaptive 8-Color',colors:result.colors,category:'Custom',description:'Median Cut palette generated from this image.',colorCount:result.colors.length,editable:true,builtIn:false};
     next.paletteId=activePalette.id;next.paletteName=activePalette.name;next.paletteColors=activePalette.colors.slice();
     extractionDuration=result.durationMs;$('extractionTime').textContent=`${result.durationMs.toFixed(2)} ms`;
-  } else {
+  }     else {
     activePalette=getPalette(preset.settings.paletteId);
     next.paletteId=activePalette.id;next.paletteName=activePalette.name;next.paletteColors=activePalette.colors.slice();
   }
-  $('preset').value=preset.id;
   history.push(next);applySettings(next);
 }
 
@@ -387,6 +446,8 @@ function populateSelectors() {
 }
 
 function applyPreset(presetId) {
+  $('preset').value='';
+  $('editorPreset').value='';
   if(COLOR_PRESETS.some(item=>item.id===presetId)) {
     applyColorPreset(presetId);
     return;
@@ -395,6 +456,85 @@ function applyPreset(presetId) {
   const next = {...getSettings(), ...preset.settings, preset:preset.id};
   history.push(next);
   applySettings(next);
+}
+
+function populateEditorPresets() {
+  const select = $('editorPreset');
+  if (!select) return;
+  const selected = select.value;
+  const presets = presetStore.list();
+  select.replaceChildren(new Option('Custom settings', ''));
+  const builtInGroup = document.createElement('optgroup');
+  builtInGroup.label = 'Built-in';
+  const customGroup = document.createElement('optgroup');
+  customGroup.label = 'Saved on this device';
+  for (const preset of presets) {
+    const group = preset.builtIn ? builtInGroup : customGroup;
+    group.append(new Option(preset.name, preset.id));
+  }
+  select.append(builtInGroup, customGroup);
+  select.value = presets.some(preset => preset.id === selected) ? selected : '';
+  $('deleteEditorPreset').disabled = !presets.some(preset => preset.id === select.value && !preset.builtIn);
+}
+
+function updateEditorPresetButtons() {
+  const preset = presetStore.get($('editorPreset').value);
+  $('deleteEditorPreset').disabled = !preset || preset.builtIn;
+}
+
+function applyEditorPreset() {
+  const id = $('editorPreset').value;
+  updateEditorPresetButtons();
+  if (!id) return;
+  const preset = presetStore.get(id);
+  if (!preset) return;
+  const next = {...getSettings(), ...preset.settings, preset:''};
+  next.geometry = { ...geometry };
+  history.push(next);
+  applySettings(next);
+  $('editorPreset').value = id;
+  updateEditorPresetButtons();
+  $('editorPresetMessage').textContent = preset.builtIn
+    ? `Applied built-in preset “${preset.name}”.`
+    : `Applied saved preset “${preset.name}”.`;
+}
+
+function saveEditorPreset() {
+  try {
+    const name = $('editorPresetName').value.trim() || 'My preset';
+    const {preset, saved} = presetStore.add(name, getSettings());
+    populateEditorPresets();
+    $('editorPreset').value = preset.id;
+    $('editorPresetName').value = preset.name;
+    updateEditorPresetButtons();
+    $('editorPresetMessage').textContent = saved
+      ? `Saved “${preset.name}” on this device.`
+      : `“${preset.name}” is available for this session only; browser storage is unavailable.`;
+  } catch (error) {
+    $('editorPresetMessage').textContent = error.message;
+  }
+}
+
+function deleteEditorPreset() {
+  const id = $('editorPreset').value;
+  const preset = presetStore.get(id);
+  if (!preset || preset.builtIn) return;
+  presetStore.remove(id);
+  populateEditorPresets();
+  $('editorPresetMessage').textContent = `Deleted “${preset.name}”.`;
+}
+
+function applyGeometry(operation) {
+  const nextGeometry = applyGeometryOperation(geometry, operation);
+  if (nextGeometry.rotation === geometry.rotation && nextGeometry.mirrored === geometry.mirrored) return;
+  geometry = nextGeometry;
+  const next = {...getSettings(), geometry:{...geometry}};
+  history.push(next);
+  updateGeometryLabel();
+  scheduleRender();
+  scheduleSessionSave();
+  updateHistoryButtons();
+  $('editorPreset').value = '';
 }
 
 function populateComparisonSelectors() {
@@ -427,7 +567,8 @@ async function renderAlgorithmComparison() {
   $('comparePaletteB').disabled=settings.mode!=='color';
   $('compareAlgorithmA').disabled=false;
   $('compareAlgorithmB').disabled=false;
-  const dimensions = outputDimensions(source.width, source.height, settings.width);
+  const transformed = transformedDimensions(source.width, source.height, geometry);
+  const dimensions = outputDimensions(transformed.width, transformed.height, settings.width);
   const scale = Math.min(1, 512 / dimensions.width, 512 / dimensions.height);
   const previewWidth = Math.max(1, Math.round(dimensions.width * scale));
   const previewHeight = Math.max(1, Math.round(dimensions.height * scale));
@@ -441,8 +582,9 @@ async function renderAlgorithmComparison() {
     sample.height = logical.height;
     const sampleContext = sample.getContext('2d', {willReadFrequently:true});
     if (!sampleContext) throw new Error('Could not initialize comparison processing canvas.');
-    sampleContext.drawImage(source, 0, 0, logical.width, logical.height);
+    drawSourceTransformed(sampleContext, source, geometry, logical.width, logical.height);
     const pixels = sampleContext.getImageData(0, 0, logical.width, logical.height);
+    const adjustments = adjustmentsFromSettings(settings);
     const colorSettings = {
       method:settings.distanceMethod,
       alphaMode:settings.alphaMode,
@@ -453,20 +595,20 @@ async function renderAlgorithmComparison() {
       seed:settings.seed,
       randomness:settings.randomness,
       serpentine:settings.serpentine,
-      adjustments:{
-        brightness:settings.brightness,contrast:settings.colorContrast,saturation:settings.saturation,
-        gamma:settings.gamma,exposure:settings.exposure,hue:settings.hue,
-        temperature:settings.temperature,tint:settings.tint
-      }
+      adjustments:DEFAULT_ADJUSTMENTS
     };
     const renderCandidate=async(algorithm,palette)=>{
-      const key=JSON.stringify([sourceRevision,logical.width,logical.height,algorithm,settings.mode,settings.mode==='color'?palette.colors:null,colorSettings]);
+      const key=JSON.stringify([sourceRevision,logical.width,logical.height,geometry,adjustments,algorithm,settings.mode,settings.mode==='color'?palette.colors:null,colorSettings]);
       if(comparisonCache.has(key))return comparisonCache.get(key);
       const options=settings.mode==='color'
         ? {...colorSettings,algorithm,palette:palette.colors}
         : resolveAlgorithmSettings(settings);
-      const job=runImageJob('compare-images',pixels,{
-        mode:settings.mode,algorithm,options
+      const job=runImageJob('process-editor-image',pixels,{
+        mode:settings.mode,algorithm,options,adjustments,
+        palette:settings.mode==='color'?palette.colors:undefined,
+        paletteMethod:settings.distanceMethod,
+        alphaMode:settings.alphaMode,
+        background:settings.background
       },{priority:'medium'});
       activeComparisonJobs.push(job);
       const result=await job.promise;
@@ -583,7 +725,8 @@ async function exportCurrentImage() {
     if(format==='avif'&&!exportCapabilities?.formats.avif) {
       throw Object.assign(new Error('AVIF encoding is not supported by this browser. Choose PNG, JPEG, or WebP.'),{code:'UNSUPPORTED_ENCODER'});
     }
-    const dimensions=outputDimensions(source.width,source.height,settings.width);
+    const transformed=transformedDimensions(source.width,source.height,geometry);
+    const dimensions=outputDimensions(transformed.width,transformed.height,settings.width);
     if(dimensions.width>32_767||dimensions.height>32_767||dimensions.width*dimensions.height>MAX_OUTPUT_PIXELS) {
       throw new Error('Export exceeds the 20-megapixel memory-safe output limit. Reduce the output width.');
     }
@@ -593,14 +736,16 @@ async function exportCurrentImage() {
     const sampleContext=sample.getContext('2d',{willReadFrequently:true});
     if(!sampleContext)throw new Error('Could not allocate the full-resolution processing buffer.');
     const resizeStarted=performance.now();
-    sampleContext.drawImage(source,0,0,logical.width,logical.height);
+    drawSourceTransformed(sampleContext,source,geometry,logical.width,logical.height);
     const pixels=sampleContext.getImageData(0,0,logical.width,logical.height);
     resizeMs=performance.now()-resizeStarted;
     $('exportStatus').textContent='Processing original image at export resolution…';
     const processStart=performance.now();
-    const job=runImageJob('process-image',pixels,{
-      mode:settings.mode,algorithm:settings.algorithm,
-      options:settings.mode==='color'?colorProcessingSettings(settings,settings.paletteColors):resolveAlgorithmSettings(settings)
+    const job=runImageJob('process-editor-image',pixels,{
+      mode:settings.mode,algorithm:settings.algorithm,adjustments:adjustmentsFromSettings(settings),
+      options:settings.mode==='color'?colorProcessingSettings(settings,settings.paletteColors):resolveAlgorithmSettings(settings),
+      palette:settings.mode==='color'?settings.paletteColors:undefined,
+      paletteMethod:settings.distanceMethod,alphaMode:settings.alphaMode,background:settings.background
     },{priority:'medium',signal:controller.signal});
     activeExportController.cancelProcessing=job.cancel;
     const result=await job.promise;
@@ -642,7 +787,7 @@ async function exportCurrentImage() {
     baseline.width=dimensions.width;baseline.height=dimensions.height;
     const baselineContext=baseline.getContext('2d');
     if(!baselineContext)throw new Error('Could not allocate the comparison-size canvas.');
-    baselineContext.drawImage(source,0,0,dimensions.width,dimensions.height);
+    drawSourceTransformed(baselineContext,source,geometry,dimensions.width,dimensions.height);
     const baselineBlob=await encodeCanvas(baseline,format,selectedQuality,{background:$('jpegBackground').value});
     const reduction=baselineBlob.size
       ?((baselineBlob.size-blob.size)/baselineBlob.size)*100
@@ -693,27 +838,63 @@ async function loadImage(file) {
   } finally {URL.revokeObjectURL(url);}
 }
 
+function centerCanvasScroll() {
+  const wrap = $('canvasWrap');
+  wrap.scrollLeft = Math.max(0, (wrap.scrollWidth - wrap.clientWidth) / 2);
+  wrap.scrollTop = Math.max(0, (wrap.scrollHeight - wrap.clientHeight) / 2);
+}
+
 function updateCanvasZoom() {
   if (!source) return;
   const wrap = $('canvasWrap');
+  const stage = $('canvasStage');
+  const view = stage.dataset.view || 'processed';
+  const sideBySide = view === 'side-by-side';
+  const gap = sideBySide ? 12 : 0;
+  const canvas = $('outputCanvas');
   if (fitZoom) {
-    const availableWidth = Math.max(100, wrap.clientWidth - 64);
     const availableHeight = Math.max(100, wrap.clientHeight - 80);
-    zoom = Math.min(1, availableWidth / $('outputCanvas').width, availableHeight / $('outputCanvas').height);
+    const availableWidth = sideBySide
+      ? Math.max(100, (wrap.clientWidth - 64 - gap) / 2)
+      : Math.max(100, wrap.clientWidth - 64);
+    zoom = Math.min(1, availableWidth / canvas.width, availableHeight / canvas.height);
   }
-  const width = Math.max(1, Math.round($('outputCanvas').width * zoom));
-  const height = Math.max(1, Math.round($('outputCanvas').height * zoom));
-  $('canvasStage').style.width = `${width}px`;
-  $('canvasStage').style.height = `${height}px`;
-  for (const id of ['originalCanvas', 'outputCanvas']) {
-    $(id).style.width = `${width}px`;
-    $(id).style.height = `${height}px`;
+  zoom = Math.min(8, Math.max(0.1, zoom));
+  const width = Math.max(1, Math.round(canvas.width * zoom));
+  const height = Math.max(1, Math.round(canvas.height * zoom));
+  stage.style.width = `${sideBySide ? width * 2 + gap : width}px`;
+  stage.style.height = `${height}px`;
+  const original = $('originalCanvas');
+  for (const element of [original, canvas]) {
+    element.style.width = `${width}px`;
+    element.style.height = `${height}px`;
+    element.style.top = '0';
   }
+  original.style.left = '0';
+  canvas.style.left = sideBySide ? `${width + gap}px` : '0';
   $('zoomValue').textContent = fitZoom ? 'Fit' : `${Math.round(zoom * 100)}%`;
+  for (const id of ['zoomOut', 'zoomIn', 'zoomActual', 'zoomValue']) {
+    if ($(id)) $(id).disabled = false;
+  }
+}
+
+function resetZoomAndPan() {
+  fitZoom = true;
+  updateCanvasZoom();
+  requestAnimationFrame(centerCanvasScroll);
+}
+
+function setZoom(nextZoom) {
+  fitZoom = false;
+  zoom = Math.min(8, Math.max(0.1, nextZoom));
+  updateCanvasZoom();
 }
 
 function setView(mode) {
-  $('canvasStage').dataset.view = mode;
+  const stage = $('canvasStage');
+  stage.dataset.view = mode;
+  stage.classList.remove('holding-original');
+  $('holdOriginal').setAttribute('aria-pressed', 'false');
   for (const button of document.querySelectorAll('.view-tab')) {
     const active = button.dataset.view === mode;
     button.classList.toggle('active', active);
@@ -724,13 +905,18 @@ function setView(mode) {
   $('compareLine').hidden = !comparing;
   if (!comparing) $('outputCanvas').style.clipPath = 'inset(0 0 0 0)';
   updateComparison();
+  updateCanvasZoom();
+  scheduleSessionSave();
 }
 
 function updateComparison() {
   const value = Number($('compare').value);
   const isComparing = $('canvasStage').dataset.view === 'compare';
+  const slider = $('compare');
+  if (slider) slider.value = String(value);
   $('outputCanvas').style.clipPath = isComparing ? `inset(0 ${100-value}% 0 0)` : 'inset(0 0 0 0)';
   $('compareLine').style.left = `${value}%`;
+  $('compareLine').setAttribute('aria-valuenow', String(Math.round(value)));
   $('compareValue').textContent = `${value}%`;
 }
 
@@ -747,11 +933,7 @@ function colorProcessingSettings(settings, palette=activePalette.colors) {
     seed:settings.seed,
     randomness:settings.randomness,
     serpentine:settings.serpentine,
-    adjustments:{
-      brightness:settings.brightness,contrast:settings.colorContrast,saturation:settings.saturation,
-      gamma:settings.gamma,exposure:settings.exposure,hue:settings.hue,
-      temperature:settings.temperature,tint:settings.tint
-    }
+    adjustments:DEFAULT_ADJUSTMENTS
   };
 }
 
@@ -802,7 +984,8 @@ async function render() {
   $('status').textContent = 'Rendering image…';
   $('statusDot').className = 'processing';
   try {
-    const dimensions = outputDimensions(source.width, source.height, settings.width);
+    const transformed = transformedDimensions(source.width, source.height, geometry);
+    const dimensions = outputDimensions(transformed.width, transformed.height, settings.width);
     if (dimensions.width > 32_767 || dimensions.height > 32_767 || dimensions.width * dimensions.height > MAX_OUTPUT_PIXELS) {
       throw new Error('Preview output exceeds the 20-megapixel memory-safe limit. Reduce the output width.');
     }
@@ -818,12 +1001,14 @@ async function render() {
     low.height = logical.height;
     const lowContext = low.getContext('2d', {willReadFrequently:true});
     if (!lowContext) throw new Error('Could not initialize the processing canvas.');
-    lowContext.drawImage(source, 0, 0, logical.width, logical.height);
+    drawSourceTransformed(lowContext, source, geometry, logical.width, logical.height);
     const pixels = lowContext.getImageData(0, 0, logical.width, logical.height);
     const processStart = performance.now();
-    const job=runImageJob('process-image',pixels,{
-      mode:settings.mode,algorithm:settings.algorithm,
-      options:settings.mode==='color'?colorProcessingSettings(settings,settings.paletteColors):resolveAlgorithmSettings(settings)
+    const job=runImageJob('process-editor-image',pixels,{
+      mode:settings.mode,algorithm:settings.algorithm,adjustments:adjustmentsFromSettings(settings),
+      options:settings.mode==='color'?colorProcessingSettings(settings,settings.paletteColors):resolveAlgorithmSettings(settings),
+      palette:settings.mode==='color'?settings.paletteColors:undefined,
+      paletteMethod:settings.distanceMethod,alphaMode:settings.alphaMode,background:settings.background
     },{priority:'high'});
     activePreviewJob=job;
     const result=await job.promise;
@@ -839,7 +1024,7 @@ async function render() {
     const outputContext = outputCanvas.getContext('2d');
     if (!originalContext || !outputContext) throw new Error('Could not initialize the preview canvas.');
     originalContext.clearRect(0, 0, previewDimensions.width, previewDimensions.height);
-    originalContext.drawImage(source, 0, 0, previewDimensions.width, previewDimensions.height);
+    drawSourceTransformed(originalContext, source, geometry, previewDimensions.width, previewDimensions.height);
     outputContext.clearRect(0, 0, previewDimensions.width, previewDimensions.height);
     outputContext.imageSmoothingEnabled = false;
     outputContext.drawImage(low, 0, 0, previewDimensions.width, previewDimensions.height);
@@ -904,13 +1089,16 @@ function scheduleRender() {
   $('exportReduction').textContent='—';
   clearTimeout(debounceTimer);
   debounceTimer = setTimeout(render, 130);
+  scheduleSessionSave();
 }
 
 function resetSettings() {
   const current = getSettings();
   if (sameSettings(current, defaults)) return;
-  history.push(defaults);
-  applySettings(defaults);
+  geometry = {...DEFAULT_GEOMETRY};
+  const next = {...defaults, geometry:{...DEFAULT_GEOMETRY}};
+  history.push(next);
+  applySettings(next);
 }
 
 for (const id of controls) {
@@ -932,13 +1120,39 @@ for (const id of controls) {
   }
   el.addEventListener('input', () => {
     if (id !== 'quality' && $('preset').value) $('preset').value = '';
+    if ($('editorPreset')) $('editorPreset').value = '';
     updateLabels();
     scheduleRender();
+    commitSettings({coalesceKey: id, coalesceMs: 600});
   });
-  el.addEventListener('change', commitSettings);
+  el.addEventListener('change', () => commitSettings({coalesceKey: id, coalesceMs: 600}));
 }
 $('reset').addEventListener('click', resetSettings);
 $('resetProperties').addEventListener('click', resetSettings);
+$('resetAdjustments').addEventListener('click', () => {
+  applyingSettings = true;
+  try {
+    $('brightness').value = 0;
+    $('adjustContrast').value = 0;
+    $('saturation').value = 0;
+    $('exposure').value = 0;
+    $('gamma').value = 1;
+    $('hue').value = 0;
+    $('temperature').value = 0;
+    $('tint').value = 0;
+    $('grayscale').checked = false;
+    $('invert').checked = false;
+  } finally {
+    applyingSettings = false;
+  }
+  updateLabels();
+  commitSettings();
+});
+for (const operation of ['rotate-ccw', 'rotate-cw', 'rotate-180', 'flip-h', 'flip-v', 'reset']) {
+  const button = document.querySelector(`[data-geometry="${operation}"]`);
+  if (!button) continue;
+  button.addEventListener('click', () => applyGeometry(operation));
+}
 $('undo').addEventListener('click', () => {
   const previous = history.undo();
   if (!previous) return;
@@ -1222,6 +1436,8 @@ window.addEventListener('pagehide',()=>{
   source?.close?.();
   processor.cancelAll('Page is closing.');
   jobScheduler.close();
+  sessionStore.flush();
+  sessionStore.dispose();
 });
 
 for (const button of document.querySelectorAll('.view-tab')) {
@@ -1338,49 +1554,204 @@ $('extractPalette').addEventListener('click',async()=>{
 });
 $('cancelExtraction').addEventListener('click',()=>activeExtractionJob?.cancel('Palette extraction cancelled.'));
 for(const id of ['comparePaletteA','comparePaletteB'])$(id).addEventListener('change',renderAlgorithmComparison);
-$('zoomIn').addEventListener('click', () => {
-  fitZoom = false;
-  zoom = Math.min(4, zoom * 1.25);
-  updateCanvasZoom();
+$('editorPreset').addEventListener('change', () => {
+  if ($('editorPreset').value) applyEditorPreset();
 });
-$('zoomOut').addEventListener('click', () => {
-  fitZoom = false;
-  zoom = Math.max(.1, zoom / 1.25);
-  updateCanvasZoom();
+$('saveEditorPreset').addEventListener('click', saveEditorPreset);
+$('deleteEditorPreset').addEventListener('click', deleteEditorPreset);
+$('importEditorPreset').addEventListener('click', () => $('editorPresetFile').click());
+$('exportEditorPresets').addEventListener('click', async () => {
+  try {
+    const blob=new Blob([presetStore.exportJSON()],{type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const link=document.createElement('a');
+    link.href=url;link.download='sidali-ditherlab-editor-presets.json';
+    document.body.append(link);link.click();link.remove();
+    setTimeout(()=>resources.revokeObjectURL(url),30_000);
+    $('editorPresetMessage').textContent='Editor presets exported.';
+  } catch (error) {
+    $('editorPresetMessage').textContent=error.message;
+  }
 });
-$('zoomValue').addEventListener('click', () => {
-  fitZoom = true;
-  updateCanvasZoom();
+$('editorPresetFile').addEventListener('change', async event => {
+  const file=event.target.files?.[0];
+  event.target.value='';
+  if (!file) return;
+  try {
+    const text=await file.text();
+    const added=presetStore.importJSON(text);
+    populateEditorPresets();
+    $('editorPresetMessage').textContent=`Imported ${added.length} editor preset${added.length===1?'':'s'}.`;
+  } catch (error) {
+    $('editorPresetMessage').textContent=error.message;
+  }
 });
+function restoreSession() {
+  const saved = sessionStore.load();
+  if (!saved) return;
+  applySettings(saved.settings);
+  geometry = {...saved.geometry};
+  if ($('geometryLabel')) $('geometryLabel').textContent = geometryLabel(geometry);
+  setView(saved.view);
+  applyTheme(saved.theme);
+}
+
+function setHoldingOriginal(value) {
+  holdingOriginal = value;
+  $('canvasStage').classList.toggle('holding-original', value);
+  $('holdOriginal').setAttribute('aria-pressed', String(value));
+}
+$('holdOriginal').addEventListener('pointerdown', event => {
+  event.preventDefault();
+  setHoldingOriginal(true);
+  try { $('holdOriginal').releasePointerCapture?.(event.pointerId); } catch {}
+});
+$('holdOriginal').addEventListener('pointerup', event => {
+  event.preventDefault();
+  setHoldingOriginal(false);
+  try { $('holdOriginal').releasePointerCapture?.(event.pointerId); } catch {}
+});
+$('holdOriginal').addEventListener('pointercancel', () => setHoldingOriginal(false));
+$('holdOriginal').addEventListener('lostpointercapture', () => setHoldingOriginal(false));
+
+$('zoomIn').addEventListener('click', () => setZoom(zoom * 1.25));
+$('zoomOut').addEventListener('click', () => setZoom(zoom / 1.25));
+$('zoomValue').addEventListener('click', resetZoomAndPan);
+$('zoomActual').addEventListener('click', () => setZoom(1));
+function applyTheme(theme) {
+  const next = theme === 'light' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  $('brandLogo').src = next === 'light' ? 'assets/dither-orbit-lockup-light.svg' : 'assets/dither-orbit-lockup-dark.svg';
+  document.querySelector('meta[name="theme-color"]').content = next === 'light' ? '#F3F5F2' : '#0B0D0E';
+  $('theme').setAttribute('aria-label', next === 'light' ? 'Switch to dark theme' : 'Switch to light theme');
+  scheduleSessionSave();
+}
 $('theme').addEventListener('click', () => {
-  const light = document.documentElement.dataset.theme !== 'light';
-  document.documentElement.dataset.theme = light ? 'light' : 'dark';
-  $('brandLogo').src = light ? 'assets/dither-orbit-lockup-light.svg' : 'assets/dither-orbit-lockup-dark.svg';
-  document.querySelector('meta[name="theme-color"]').content = light ? '#F3F5F2' : '#0B0D0E';
-  $('theme').setAttribute('aria-label', light ? 'Switch to dark theme' : 'Switch to light theme');
+  const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+  applyTheme(next);
 });
+const canvasWrap = $('canvasWrap');
+canvasWrap.addEventListener('pointerdown', event => { console.log('POINTERDOWN', {target:event.target?.id, spacePressed, button:event.button, pointerType:event.pointerType});
+  if (!spacePressed && event.button !== 1) return;
+  event.preventDefault();
+  try { canvasWrap.setPointerCapture?.(event.pointerId); } catch {}
+  panState = {
+    x: event.clientX,
+    y: event.clientY,
+    scrollLeft: canvasWrap.scrollLeft,
+    scrollTop: canvasWrap.scrollTop
+  };
+});
+canvasWrap.addEventListener('lostpointercapture', () => {panState = null;});
+canvasWrap.addEventListener('pointermove', event => {
+  if (!panState) { console.log('PAN move ignored: no panState'); return; }
+  event.preventDefault();
+  canvasWrap.scrollLeft = Math.max(0, panState.scrollLeft - (event.clientX - panState.x));
+  canvasWrap.scrollTop = Math.max(0, panState.scrollTop - (event.clientY - panState.y));
+});
+canvasWrap.addEventListener('pointerup', event => {
+  if (!panState) return;
+  event.preventDefault();
+  panState = null;
+});
+canvasWrap.addEventListener('pointercancel', () => {panState = null;});
 window.addEventListener('resize', () => {if (fitZoom) updateCanvasZoom();});
+function isEditableKeyboardTarget(target) {
+  if (!(target instanceof Element)) return false;
+  const tag = target.tagName?.toLowerCase();
+  return tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable;
+}
+function openShortcutsDialog() {
+  $('shortcutsDialog').showModal();
+}
+function closeShortcutsDialog() {
+  if ($('shortcutsDialog').open) $('shortcutsDialog').close();
+}
+$('compareLine').addEventListener('keydown', event => {
+  const current = Number($('compare').value);
+  const minimum = Number($('compare').getAttribute('aria-valuemin') ?? 0);
+  const maximum = Number($('compare').getAttribute('aria-valuemax') ?? 100);
+  const step = event.shiftKey ? 10 : 1;
+  let value = current;
+  if (event.key === 'ArrowLeft') value = Math.max(minimum, current - step);
+  else if (event.key === 'ArrowRight') value = Math.min(maximum, current + step);
+  else if (event.key === 'Home') value = minimum;
+  else if (event.key === 'End') value = maximum;
+  if (value !== current) {
+    event.preventDefault();
+    $('compare').value = String(value);
+    updateComparison();
+  }
+});
 window.addEventListener('keydown', event => {
   const modifier = event.ctrlKey || event.metaKey;
-  if (modifier && event.key.toLowerCase() === 'z') {
-    event.preventDefault();
-    (event.shiftKey ? $('redo') : $('undo')).click();
-  } else if (modifier && event.key.toLowerCase() === 'y') {
-    event.preventDefault();
-    $('redo').click();
-  } else if (modifier && event.key.toLowerCase() === 'r') {
-    event.preventDefault();
-    resetSettings();
-  } else if (modifier && event.key.toLowerCase() === 'e') {
-    event.preventDefault();
-    $('download').click();
+  const key = event.key?.toLowerCase?.() ?? '';
+  if (modifier) {
+    if (key === 'z') {
+      event.preventDefault();
+      (event.shiftKey ? $('redo') : $('undo')).click();
+      return;
+    }
+    if (key === 'y') {
+      event.preventDefault();
+      $('redo').click();
+      return;
+    }
+    if (key === 'o') {
+      event.preventDefault();
+      $('file').click();
+      return;
+    }
+    if (key === 's') {
+      event.preventDefault();
+      $('download').click();
+      return;
+    }
+    if (key === 'r') {
+      event.preventDefault();
+      resetSettings();
+      return;
+    }
+    if (key === 'e') {
+      event.preventDefault();
+      $('download').click();
+      return;
+    }
   }
+  if (isEditableKeyboardTarget(event.target)) return;
+  if (key === ' ') {
+    event.preventDefault();
+    spacePressed = true;
+    return;
+  }
+  if (key === '?') {
+    event.preventDefault();
+    openShortcutsDialog();
+    return;
+  }
+  if (modifier) return;
+  if (key === '+') { event.preventDefault(); setZoom(zoom * 1.25); return; }
+  if (key === '-') { event.preventDefault(); setZoom(zoom / 1.25); return; }
+  if (key === '0') { event.preventDefault(); resetZoomAndPan(); return; }
+  if (key === '1') { event.preventDefault(); setZoom(1); return; }
+});
+window.addEventListener('keyup', event => {
+  const key = event.key?.toLowerCase?.() ?? '';
+  if (key === ' ') spacePressed = false;
+});
+$('shortcutsOpen').addEventListener('click', openShortcutsDialog);
+$('shortcutsClose').addEventListener('click', closeShortcutsDialog);
+$('clearSession').addEventListener('click', () => {
+  sessionStore.clear();
+  $('editorPresetMessage').textContent='Saved session cleared.';
 });
 
 updateLabels();
 populateSelectors();
 populateComparisonSelectors();
+populateEditorPresets();
 updateLabels();
 updateHistoryButtons();
 updateExportControls();
 initializeExportCapabilities();
+restoreSession();

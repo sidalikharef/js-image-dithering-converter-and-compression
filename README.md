@@ -111,9 +111,16 @@ No installation, account, or image upload to a server required.
 - Image upload through file picker or drag and drop.
 - Interactive original/output comparison slider.
 - Original, processed, and comparison views.
-- Zoom in, zoom out, and fit-to-screen controls.
-- Undo and redo adjustment changes.
+- Side-by-side output comparison.
+- Hold-original preview mode.
+- Zoom in, zoom out, fit-to-screen, and actual-size controls; space plus drag pans.
+- Undo and redo adjustment changes with coalesced rapid slider commits.
 - Reset settings to defaults.
+- Transform orientation with counter-clockwise/clockwise rotation, 180° rotation, horizontal or vertical flip, and reset.
+- Adjustments for brightness, contrast, saturation, exposure, gamma, hue, grayscale, and inversion before quantization.
+- Built-in and locally saved editor presets, plus preset JSON import/export.
+- Versioned local session persistence for settings, geometry, view, and theme.
+- Keyboard shortcuts for undo/redo, open/save/export, zoom, fit, actual size, pan, and help.
 - Responsive layouts for desktop and mobile.
 
 ### 📦 Image Optimization
@@ -218,7 +225,7 @@ Color Bayer adds a repeating, zero-mean spatial RGB offset before palette matchi
 
 Built-in Commodore 64 colors use the common Pepto RGB palette variant; CGA uses the classic 16-entry RGBI color set assembled across display modes. The Game Boy Classic palette is a DMG-inspired four-tone set. Artistic palette colors are original selections. Palette matching can produce only the palette colors; preserved fully transparent pixels remain transparent. Partial alpha is retained in Preserve mode. Composite mode blends against the selected background in sRGB code values before adjustments; Opaque mode uses that same background for transparent portions and emits opaque pixels. Hidden RGB values in fully transparent pixels are therefore ignored in both modes.
 
-Color adjustments are applied to a fresh sample of the original on every render, in this order: decode sRGB to linear RGB; apply exposure; apply contrast and brightness; adjust saturation; rotate hue; apply temperature and tint offsets; apply gamma; encode back to sRGB; then evaluate the selected palette distance. Brightness and temperature/tint ranges are normalized offsets; exposure uses EV stops; hue is degrees; gamma is a positive exponent control. Adjustments never modify the uploaded image.
+Color adjustments are applied to a fresh sample of the original on every render, in this order: decode sRGB to linear RGB; apply exposure; apply contrast and brightness; adjust saturation; rotate hue; apply temperature and tint offsets; apply grayscale; apply gamma; encode back to sRGB; then apply inversion. Brightness and temperature/tint ranges are normalized offsets; exposure uses EV stops; hue is degrees; gamma is a positive exponent control. Grayscale and inversion are explicit boolean controls. Adjustments never modify the uploaded image.
 
 The palette library is local and versioned. User-created palettes are stored under `sidali-ditherlab:custom-palettes:v1` in the current browser profile. Palette imports use a bounded, versioned JSON schema and are treated as data only. No image or palette information is sent to a service.
 
@@ -279,7 +286,8 @@ sidali-ditherlab/
 │   ├── core.test.mjs
 │   ├── engine.test.mjs
 │   ├── color.test.mjs
-│   └── phase-e.test.mjs
+│   ├── phase-e.test.mjs
+│   └── editor.test.mjs
 ├── benchmarks/
 │   ├── algorithms.mjs
 │   ├── color-processing.mjs
@@ -296,6 +304,14 @@ sidali-ditherlab/
 │   │   ├── presets.mjs
 │   │   ├── registry.mjs
 │   │   └── validation.mjs
+│   ├── editor/
+│   │   ├── adjustments.mjs
+│   │   ├── pipeline.mjs
+│   │   ├── presets.mjs
+│   │   ├── preview-scheduler.mjs
+│   │   ├── session.mjs
+│   │   ├── state.mjs
+│   │   └── transforms.mjs
 │   ├── workers/
 │   │   ├── image-worker.mjs
 │   │   ├── job-scheduler.mjs
@@ -322,7 +338,7 @@ sidali-ditherlab/
 
 ## 🧪 Development and Testing
 
-The application uses native JavaScript modules and Node.js's built-in testing tools. No dependency installation is required.
+The application uses native JavaScript modules and Node.js's built-in testing tools. No dependency installation is required. The test suite covers the modular engine, full-color processing, exports, workers, batch queue, and editor transforms, adjustments, pipeline, presets, session persistence, preview scheduling, and worker operations.
 
 Run the test suite:
 

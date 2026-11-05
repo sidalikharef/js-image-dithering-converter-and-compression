@@ -36,6 +36,7 @@
         <button class="icon-button theme-button" id="theme" type="button" aria-label="Switch to light theme" title="Switch theme">◐</button>
         <a class="icon-button github-link" aria-label="View GitHub repository" title="View GitHub repository" href="https://github.com/sidalikharef/js-image-dithering-converter-and-compression" target="_blank" rel="noreferrer">↗</a>
         <button class="text-button" id="openBatch" type="button">Batch</button>
+        <button class="icon-button" id="shortcutsOpen" type="button" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">?</button>
         <button class="export-button" id="download" type="button" disabled><span aria-hidden="true">↓</span> Export image</button>
       </div>
     </header>
@@ -79,7 +80,8 @@
         </section>
 
         <div class="sidebar-bottom">
-          <button class="quiet-button" id="reset" type="button">Reset adjustments <span>⌘R</span></button>
+          <button class="quiet-button" id="reset" type="button">Reset all settings <span>⌘R</span></button>
+          <button class="quiet-button" id="clearSession" type="button">Clear saved session <span>Local</span></button>
           <span class="privacy-note">Your images are processed locally and never sent to a server.</span>
         </div>
       </aside>
@@ -89,12 +91,15 @@
           <div class="view-tabs" role="group" aria-label="Preview mode">
             <button type="button" class="view-tab active" data-view="processed" aria-pressed="true">Output</button>
             <button type="button" class="view-tab" data-view="compare" aria-pressed="false">Compare</button>
+            <button type="button" class="view-tab" data-view="side-by-side" aria-pressed="false">Side by side</button>
             <button type="button" class="view-tab" data-view="original" aria-pressed="false">Original</button>
             <button type="button" class="view-tab" id="algorithmCompareOpen" aria-haspopup="dialog">Algorithm comparison</button>
           </div>
           <div class="zoom-tools" aria-label="Preview zoom">
+            <button class="text-button hold-original" id="holdOriginal" type="button" aria-pressed="false" title="Hold to view the original">Hold original</button>
             <button class="icon-button" id="zoomOut" type="button" aria-label="Zoom out" title="Zoom out" disabled>−</button>
-            <button class="zoom-value" id="zoomValue" type="button" title="Fit image to canvas" disabled>Fit</button>
+            <button class="zoom-value" id="zoomValue" type="button" title="Fit image to canvas and reset pan" disabled>Fit</button>
+            <button class="icon-button" id="zoomActual" type="button" aria-label="Actual size" title="Actual size (1)" disabled>1:1</button>
             <button class="icon-button" id="zoomIn" type="button" aria-label="Zoom in" title="Zoom in" disabled>+</button>
           </div>
         </div>
@@ -109,7 +114,7 @@
           <div class="canvas-stage" id="canvasStage" hidden>
             <canvas id="originalCanvas" aria-label="Original image"></canvas>
             <canvas id="outputCanvas" aria-label="Processed image preview"></canvas>
-            <div class="compare-line" id="compareLine" hidden><span>BEFORE</span><i></i><span>AFTER</span></div>
+            <div class="compare-line" id="compareLine" role="slider" tabindex="0" aria-label="Before and after split position" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50" hidden><span>BEFORE</span><i></i><span>AFTER</span></div>
           </div>
           <div class="compare-control" id="compareControl" hidden>
             <label for="compare">Before / after</label><input id="compare" type="range" min="0" max="100" value="50" /><output id="compareValue">50%</output>
@@ -179,6 +184,51 @@
             <label for="serpentine">Serpentine scanning</label>
             <input id="serpentine" type="checkbox" aria-label="Enable serpentine scanning" />
           </div>
+        </section>
+        <section class="tool-section transform-section">
+          <h2>Transform</h2>
+          <div class="geometry-actions" role="group" aria-label="Image transform">
+            <button class="text-button" type="button" data-geometry="rotate-ccw" title="Rotate counter-clockwise">↺ 90°</button>
+            <button class="text-button" type="button" data-geometry="rotate-cw" title="Rotate clockwise">↻ 90°</button>
+            <button class="text-button" type="button" data-geometry="rotate-180" title="Rotate 180 degrees">180°</button>
+            <button class="text-button" type="button" data-geometry="flip-h" title="Flip horizontally">Flip H</button>
+            <button class="text-button" type="button" data-geometry="flip-v" title="Flip vertically">Flip V</button>
+            <button class="text-button" type="button" data-geometry="reset" title="Reset orientation">Reset</button>
+          </div>
+          <p class="geometry-label" id="geometryLabel">Original orientation</p>
+        </section>
+        <section class="tool-section adjustments-section">
+          <h2>Adjustments</h2>
+          <div class="control"><label for="brightness">Brightness <output id="brightnessValue">0</output></label><input id="brightness" type="range" min="-100" max="100" step="1" value="0" /></div>
+          <div class="control"><label for="adjustContrast">Contrast <output id="adjustContrastValue">0</output></label><input id="adjustContrast" type="range" min="-100" max="100" step="1" value="0" /></div>
+          <div class="control"><label for="saturation">Saturation <output id="saturationValue">0</output></label><input id="saturation" type="range" min="-100" max="100" step="1" value="0" /></div>
+          <div class="control"><label for="exposure">Exposure <output id="exposureValue">0 EV</output></label><input id="exposure" type="range" min="-3" max="3" step="0.1" value="0" /></div>
+          <div class="control"><label for="gamma">Gamma <output id="gammaValue">1.00</output></label><input id="gamma" type="range" min="0.1" max="3" step="0.05" value="1" /></div>
+          <div class="control"><label for="hue">Hue <output id="hueValue">0°</output></label><input id="hue" type="range" min="-180" max="180" step="1" value="0" /></div>
+          <div class="control"><label for="temperature">Temperature <output id="temperatureValue">0</output></label><input id="temperature" type="range" min="-1" max="1" step="0.05" value="0" /></div>
+          <div class="control"><label for="tint">Tint <output id="tintValue">0</output></label><input id="tint" type="range" min="-1" max="1" step="0.05" value="0" /></div>
+          <div class="control toggle-control"><label for="grayscale">Grayscale</label><input id="grayscale" type="checkbox" aria-label="Convert to grayscale" /></div>
+          <div class="control toggle-control"><label for="invert">Invert</label><input id="invert" type="checkbox" aria-label="Invert colors" /></div>
+          <button class="text-button" id="resetAdjustments" type="button">Reset adjustments</button>
+        </section>
+        <section class="tool-section editor-presets-section">
+          <h2>Editor presets</h2>
+          <div class="control">
+            <label for="editorPreset">Preset</label>
+            <select id="editorPreset" aria-label="Select an editor preset"><option value="">Custom settings</option></select>
+          </div>
+          <div class="control">
+            <label for="editorPresetName">Save current as</label>
+            <input id="editorPresetName" type="text" maxlength="64" placeholder="My preset" autocomplete="off" />
+          </div>
+          <div class="preset-actions">
+            <button class="text-button" id="saveEditorPreset" type="button">Save</button>
+            <button class="text-button" id="deleteEditorPreset" type="button">Delete</button>
+            <button class="text-button" id="importEditorPreset" type="button">Import</button>
+            <button class="text-button" id="exportEditorPresets" type="button">Export all</button>
+            <input id="editorPresetFile" type="file" accept="application/json,.json" hidden />
+          </div>
+          <p class="palette-message" id="editorPresetMessage" role="status" aria-live="polite"></p>
         </section>
         <section class="tool-section color-studio" aria-labelledby="colorStudioTitle">
           <h2 id="colorStudioTitle">Color &amp; Palette</h2>
@@ -257,17 +307,6 @@
                 <button class="text-button" id="cancelExtraction" type="button" hidden>Cancel extraction</button>
                 <span id="extractionTime">—</span>
               </div>
-            </details>
-            <details class="palette-details">
-              <summary>Color adjustments</summary>
-              <div class="control"><label for="brightness">Brightness <output id="brightnessValue">0</output></label><input id="brightness" type="range" min="-1" max="1" step=".05" value="0" /></div>
-              <div class="control"><label for="colorContrast">Contrast <output id="colorContrastValue">1.0×</output></label><input id="colorContrast" type="range" min="0" max="3" step=".05" value="1" /></div>
-              <div class="control"><label for="saturation">Saturation <output id="saturationValue">1.0×</output></label><input id="saturation" type="range" min="0" max="3" step=".05" value="1" /></div>
-              <div class="control"><label for="gamma">Gamma <output id="gammaValue">1.00</output></label><input id="gamma" type="range" min=".1" max="3" step=".05" value="1" /></div>
-              <div class="control"><label for="exposure">Exposure <output id="exposureValue">0 EV</output></label><input id="exposure" type="range" min="-4" max="4" step=".1" value="0" /></div>
-              <div class="control"><label for="hue">Hue <output id="hueValue">0°</output></label><input id="hue" type="range" min="-180" max="180" step="1" value="0" /></div>
-              <div class="control"><label for="temperature">Temperature <output id="temperatureValue">0</output></label><input id="temperature" type="range" min="-1" max="1" step=".05" value="0" /></div>
-              <div class="control"><label for="tint">Tint <output id="tintValue">0</output></label><input id="tint" type="range" min="-1" max="1" step=".05" value="0" /></div>
             </details>
             <details class="palette-details">
               <summary>Transparency</summary>
@@ -385,6 +424,24 @@
       <div class="batch-summary" id="batchSummary" aria-live="polite">No images queued.</div>
       <p class="compare-dialog-status" id="batchStatus" role="status" aria-live="polite">Add up to 100 images. Files are processed locally.</p>
       <div class="batch-list" id="batchList"></div>
+    </dialog>
+    <dialog id="shortcutsDialog" class="algorithm-compare-dialog shortcuts-dialog" aria-labelledby="shortcutsTitle">
+      <div class="compare-dialog-header">
+        <div><span class="eyebrow">REFERENCE</span><h2 id="shortcutsTitle">Keyboard shortcuts</h2></div>
+        <button class="icon-button" id="shortcutsClose" type="button" aria-label="Close keyboard shortcuts">×</button>
+      </div>
+      <dl class="shortcut-list">
+        <dt><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Z</kbd></dt><dd>Undo</dd>
+        <dt><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd></dt><dd>Redo</dd>
+        <dt><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Y</kbd></dt><dd>Redo</dd>
+        <dt><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>O</kbd></dt><dd>Open image</dd>
+        <dt><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>S</kbd></dt><dd>Export image</dd>
+        <dt><kbd>+</kbd> / <kbd>−</kbd></dt><dd>Zoom in / out</dd>
+        <dt><kbd>0</kbd></dt><dd>Fit image to canvas</dd>
+        <dt><kbd>1</kbd></dt><dd>Actual size (100%)</dd>
+        <dt><kbd>Space</kbd> + drag</dt><dd>Pan the preview</dd>
+        <dt><kbd>?</kbd></dt><dd>Open this help</dd>
+      </dl>
     </dialog>
   </div>
 </body>

@@ -2,7 +2,7 @@ import {rgbToLinearRGB, linearRGBToRGB, clampChannel} from './color-space.mjs';
 
 export const DEFAULT_ADJUSTMENTS = Object.freeze({
   brightness:0, contrast:1, saturation:1, gamma:1, exposure:0,
-  hue:0, temperature:0, tint:0
+  hue:0, temperature:0, tint:0, grayscale:false, invert:false
 });
 
 const clamp01 = value => Math.min(1, Math.max(0, value));
@@ -17,6 +17,9 @@ export function validateAdjustments(adjustments = {}) {
     if (!Number.isFinite(values[name]) || values[name] < min || values[name] > max) {
       throw new RangeError(`${name} must be between ${min} and ${max}.`);
     }
+  }
+  if (typeof values.grayscale !== 'boolean' || typeof values.invert !== 'boolean') {
+    throw new TypeError('grayscale and invert must be booleans.');
   }
   return values;
 }
@@ -50,8 +53,13 @@ export function createColorAdjuster(adjustments = {}) {
   r += settings.temperature * 0.12 + settings.tint * 0.025;
   g += settings.tint * 0.025;
   b -= settings.temperature * 0.12 - settings.tint * 0.025;
+  if (settings.grayscale) {
+    const gray = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    r = g = b = gray;
+  }
   const gamma = 1 / settings.gamma;
-    return linearRGBToRGB([r,g,b].map(channel => clampChannel(clamp01(channel) ** gamma)));
+  const encoded = linearRGBToRGB([r,g,b].map(channel => clampChannel(clamp01(channel) ** gamma)));
+  return settings.invert ? encoded.map(channel => 255 - channel) : encoded;
   };
 }
 
